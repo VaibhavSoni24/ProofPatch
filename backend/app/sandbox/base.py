@@ -10,7 +10,7 @@ from pydantic import BaseModel
 class ExecutionResult(BaseModel):
     """Normalized output from sandbox test command execution."""
 
-    exit_code: int
+    exit_code: Optional[int] = None
     output: str
     stdout: str = ""
     stderr: str = ""
