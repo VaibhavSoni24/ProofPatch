@@ -11,15 +11,15 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | **Backend Configuration** | `pytest` | 4 tests | Tests default demo mode, Nebius detection, Tavily detection, and secret exclusion. |
 | **Demo Workflow** | `pytest` | 1 test | End-to-end local reproduction, patching, regression pass, and evidence generation. |
 | **Git & Repositories** | `pytest` | 6 tests | Tests public GitHub URL parsing, credential rejection, scheme verification. |
-| **Nebius Provider** | `pytest` | 5 tests | Mocks OpenAI-compatible completions, 401 auth, 404 model errors, timeouts. |
+| **Nebius Provider** | `pytest` | 6 tests | Mocks OpenAI-compatible completions, non-NVIDIA model rejection, 401 auth, timeouts. |
 | **Tavily Provider** | `pytest` | 3 tests | Mocks search queries, disabled status, and network connection fallbacks. |
 | **Patch Parser & Security** | `pytest` | 6 tests | Path traversal rejection (`../`), diff size caps, clean hunk application. |
 | **Run Management API** | `pytest` | 5 tests | Endpoints for `/api/health`, `/api/config-status`, `/api/runs`, `/api/runs/demo`, 404 handling. |
-| **Execution Sandboxes** | `pytest` | 7 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree sandbox lifecycle. |
-| **Deterministic Verifier** | `pytest` | 6 tests | Audits missing exit codes, inconclusive baseline tests, contradictory post-patch outputs, and secrets. |
-| **Async Orchestrator Integration** | `pytest` | 3 tests | Full async workflow with mocked Nebius, Tavily, reproduction gating, and provider error handling. |
+| **Execution Sandboxes** | `pytest` | 11 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree SDK lifecycle, file transfer, patch apply, timeouts, and error handling. |
+| **Deterministic Verifier** | `pytest` | 13 tests | Audits missing exit codes, inconclusive baseline tests, unrelated failures, import errors, collection errors, timeouts, contradictory post-patch outputs, and secrets. |
+| **Async Orchestrator Integration** | `pytest` | 6 tests | Full async workflow with mocked Nebius, Tavily, strict baseline gating on unrelated failures, collection errors, timeouts, and provider error handling. |
 | **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
-| **Total Automated Tests** | | **49 tests** | **100% Pass Rate** |
+| **Total Automated Tests** | | **64 tests** | **100% Pass Rate** |
 
 ---
 

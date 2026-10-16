@@ -16,7 +16,7 @@ This document provides a comprehensive reference for all configuration options a
 | `PROOFPATCH_MODE` | `string` | `demo` | **Yes** | Execution mode: `demo` (zero-credential offline sample workflow) or `live` (invokes Nebius Token Factory & Tavily). |
 | `NEBIUS_API_KEY` | `string` | `""` | Only in `live` mode | API Key for Nebius Token Factory OpenAI-compatible inference. Must NEVER be committed to Git. |
 | `NEBIUS_BASE_URL` | `string` | `https://api.tokenfactory.nebius.com/v1/` | No | OpenAI-compatible endpoint URL for Nebius Token Factory. |
-| `NEBIUS_MODEL` | `string` | `""` | Only in `live` mode | Configured eligible NVIDIA open-source model identifier from the Nebius Token Factory catalog (e.g. `nvidia/nemotron-4-340b-instruct` or current active catalog ID from `tokenfactory.nebius.com/models`). |
+| `NEBIUS_MODEL` | `string` | `""` | Only in `live` mode | Configured eligible NVIDIA open-source model identifier from the Nebius Token Factory catalog (must start with `nvidia/*`, selected from active models at `docs.tokenfactory.nebius.com` or `tokenfactory.nebius.com/models`). |
 | `TAVILY_API_KEY` | `string` | `""` | Only if `TAVILY_ENABLED=true` | API key for Tavily Search API. Used to retrieve documentation, API updates, and security advisories. |
 | `TAVILY_ENABLED` | `boolean` | `false` | No | Set to `true` to activate autonomous web research during the diagnosis stage. |
 | `EXECUTION_BACKEND` | `string` | `docker` | No | Sandbox backend for isolating untrusted repository test execution: `docker` (local daemon) or `token_factory_sandbox` (Nebius ConTree cloud container). |
@@ -49,7 +49,7 @@ This document provides a comprehensive reference for all configuration options a
 - **Tavily (Optional)**: If `TAVILY_ENABLED=true` and `TAVILY_API_KEY` is supplied, autonomous web research is conducted during the diagnosis stage.
 - **Sandboxed Execution**: External repositories are isolated inside either:
   1. **Docker Backend (`EXECUTION_BACKEND=docker`)**: Non-networked (`--network none`), memory-capped (512MB), CPU-limited (1.0 core), disposable workspace container.
-  2. **Token Factory Sandbox (`EXECUTION_BACKEND=token_factory_sandbox`)**: Official Nebius ConTree cloud container runtime for SWE agents, provisioning isolated sessions, executing commands, and disposing resources.
+  2. **Token Factory Sandbox (`EXECUTION_BACKEND=token_factory_sandbox`)**: Official Nebius ConTree cloud container runtime for SWE agents, provisioning isolated sessions via `contree-sdk`, transferring repository files, executing commands, applying patches, and disposing resources.
 
 ---
 
@@ -58,6 +58,6 @@ This document provides a comprehensive reference for all configuration options a
 ProofPatch never fabricates verification results or assumes success without evidence:
 
 - **`PASSED`**: Claim is backed by verified execution output and exit code 0 (with zero failure indicators).
-- **`FAILED`**: Explicit test failure, patch rejection, or security check violation.
+- **`FAILED`**: Explicit test failure, patch rejection, or baseline defect not reproduced (exit code 0).
 - **`NOT_RUN`**: The stage or check was not executed (e.g., post-patch tests never ran because pre-patch reproduction failed).
-- **`INCONCLUSIVE`**: Baseline tests exited non-zero, but output revealed an environmental error (e.g. missing package or collection error) rather than reproducible proof of the reported bug.
+- **`INCONCLUSIVE`**: Baseline tests exited non-zero or failed to execute, but output revealed an environmental error (e.g. missing dependency, collection error, timeout, or unrelated test failure) rather than reproducible proof connecting to the reported defect.

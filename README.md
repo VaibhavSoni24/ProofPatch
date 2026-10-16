@@ -44,8 +44,8 @@ ProofPatch transforms bug fixing from an ungrounded chat interaction into a **tr
 
 - **Observable Evidence Workflow**: Every claim is backed by real executed commands, timestamps, and exit codes. Never presents a generated explanation as a success without executable proof.
 - **Zero-Credit Offline Demonstration**: Ships with a deterministic local demo featuring an intentionally buggy SaaS billing service (`examples/buggy-python-service/`). Runs out of the box on an ordinary laptop with zero API keys or cloud GPUs.
-- **Nebius Token Factory Adapter**: Fully asynchronous OpenAI-compatible adapter targeting eligible open-source **NVIDIA Nemotron** reasoning models.
-- **Nebius ConTree Sandbox Integration**: Supports the official Nebius ConTree container runtime (`token_factory_sandbox`) for remote cloud container execution, alongside local Docker isolation.
+- **Nebius Token Factory Adapter**: Fully asynchronous OpenAI-compatible adapter targeting eligible open-source **NVIDIA** reasoning models.
+- **Nebius ConTree Sandbox Integration**: Uses official `contree-sdk` for isolated cloud container sessions, transferring bounded repository files, applying patches, and executing tests with state preservation across commands.
 - **Tavily Research Integration**: Targeted asynchronous search retrieving real documentation, change logs, and technical discussions.
 - **Strict Sandbox Boundaries**: Disposable workspace checkouts, environment sanitization (secrets stripped from subprocesses), path traversal rejection (`../`), and container isolation.
 
@@ -253,8 +253,8 @@ ProofPatch defaults to `demo` mode. To activate genuine live model inference for
    NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
 
    # Configured eligible NVIDIA open-source model identifier
-   # (Select active model string from tokenfactory.nebius.com/models)
-   NEBIUS_MODEL=nvidia/nemotron-4-340b-instruct
+   # (Select active model string starting with nvidia/ from https://docs.tokenfactory.nebius.com/ or https://tokenfactory.nebius.com/models)
+   NEBIUS_MODEL=nvidia/<selected-active-model-id>
 
    # Sandbox Backend: "docker" or "token_factory_sandbox"
    EXECUTION_BACKEND=docker

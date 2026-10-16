@@ -68,7 +68,7 @@ stateDiagram-v2
 3. **Stage 3: Bug Reproduction**:
    - Executes allowlisted pytest command inside the selected sandbox backend (`LocalExecutionBackend` for demo, `DockerExecutionBackend` or `TokenFactorySandboxBackend` for live).
    - Captures stdout/stderr and return code.
-   - **Gating**: If tests pass cleanly (exit 0) or fail due to environmental/import errors, the run halts safely as `INCONCLUSIVE` without consuming inference tokens.
+   - **Gating**: Strict baseline reproduction classifier parses failure logs and verifies correlation between the failing tests/traces and the reported issue. Halts as `INCONCLUSIVE` (or `FAILED`) without consuming model tokens if tests pass (exit 0), fail due to unrelated tests, hit timeouts, or encounter import/syntax/collection errors.
 4. **Stage 4: Model-Driven Diagnosis**:
    - Awaits Nebius Token Factory inference using the configured eligible NVIDIA open model.
    - Enforces a strict Pydantic JSON schema (`DiagnosisResult`).
@@ -110,11 +110,13 @@ To prevent third-party code execution vulnerabilities, ProofPatch establishes th
 - Fails closed with actionable error if Docker daemon is unreachable.
 
 ### `TokenFactorySandboxBackend`
-- Official Nebius ConTree cloud container sandbox adapter for SWE agents.
+- Official Nebius ConTree cloud container sandbox adapter using the official `contree-sdk` (`Contree`, `ContreeImage`).
 - Lifecycle:
-  1. `acquire_session()`: provisions an isolated container session from `python:3.11-slim`.
-  2. `execute_tests()`: runs test commands via remote REST execution API.
-  3. `cleanup()`: releases and destroys remote container sessions upon run completion.
+  1. `acquire_session()`: acquires container image session from base image (`python:3.11-slim`) via `client.images.use(image, strict=True)`.
+  2. `transfer_workspace()`: scans and packages bounded repository contents and transfers them into the remote container via `image.apply_files()`, and sets up the test execution environment (`pip install pytest`).
+  3. `execute_tests()`: executes baseline and regression tests inside the container (`/workspace`) with state preservation (`disposable=False`) via `image.run()`.
+  4. `apply_patch()`: synchronizes surgical patch diffs directly into the remote container filesystem using `apply_files()`.
+  5. `cleanup()`: releases and destroys remote container sessions upon run completion.
 - Configured via `CONTREE_TOKEN` and `CONTREE_BASE_URL`.
 
 ---

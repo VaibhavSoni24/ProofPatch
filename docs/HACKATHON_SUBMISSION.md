@@ -47,7 +47,7 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 ## 5. Nebius Token Factory & NVIDIA Model Integration
 
 - **Endpoint**: `https://api.tokenfactory.nebius.com/v1/`
-- **Model Compatibility**: Configurable via `NEBIUS_MODEL`. Designed for eligible open-source NVIDIA reasoning models from the Nebius Token Factory catalog (e.g. `nvidia/nemotron-4-340b-instruct` or current active Nemotron identifiers from `tokenfactory.nebius.com/models`).
+- **Model Compatibility**: Configurable via `NEBIUS_MODEL`. Requires an eligible open-source NVIDIA model identifier starting with `nvidia/` from the current Nebius Token Factory catalog (e.g. selected from active models at `tokenfactory.nebius.com/models` or `docs.tokenfactory.nebius.com`). Rejects non-NVIDIA models to enforce track compliance.
 - **Adapter Design**:
   - Implements `BaseLLMProvider` with asynchronous completion handling and token usage tracking.
   - Handles rate limits (429), authentication failures (401), insufficient credits (402), and model errors (404) with typed exceptions.
@@ -58,12 +58,14 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 
 ## 6. Official Token Factory Sandbox Integration (Nebius ConTree)
 
-- **Architecture**: `TokenFactorySandboxBackend` integrates with the Nebius ConTree container runtime API (`https://api.tokenfactory.nebius.com/sandboxes`).
+- **Architecture**: `TokenFactorySandboxBackend` integrates using the official `contree-sdk` (`Contree`, `ContreeImage`).
 - **Lifecycle Implementation**:
-  - Session provisioning (`POST /sessions`) with `python:3.11-slim` base image.
-  - Test command execution (`POST /sessions/{id}/exec`) with timeout controls.
-  - Session cleanup and disposal (`DELETE /sessions/{id}`) upon run completion.
-- **Verification Status**: Tested with unit mocks for session lifecycle, command execution, and disposal. Runtime verification with live credentials will take place upon final hackathon deployment.
+  - Image acquisition via `client.images.use("python:3.11-slim", strict=True)`.
+  - Workspace file transfer: scans bounded repository contents and pushes files into the remote container via `image.apply_files()`, followed by dependency setup (`pip install pytest`).
+  - Command execution via `image.run()` with state preservation (`disposable=False`) across commands.
+  - Patch synchronization: applies unified diff to local working copy and uploads modified files to container via `image.apply_files()`.
+  - Resource disposal and session cleanup on completion.
+- **Verification Status**: Validated with mock SDK tests covering container acquisition, file transfer, patch synchronization, timeouts, and error handling. Requires live `CONTREE_TOKEN` or `NEBIUS_API_KEY` for live cloud execution.
 
 ---
 
@@ -84,9 +86,9 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 - [x] MIT License and Security Policy.
 - [x] Functional zero-credential deterministic demo mode.
 - [x] Nebius Token Factory adapter with eligible NVIDIA model configuration.
-- [x] Nebius ConTree Token Factory sandbox adapter implementation.
+- [x] Nebius ConTree Token Factory sandbox adapter implementation via official `contree-sdk`.
 - [x] Tavily Search API research integration.
-- [x] Passing backend tests (46 tests) and frontend tests (3 tests).
+- [x] Passing backend tests (61 tests) and frontend tests (3 tests) — 64 automated tests total.
 - [x] Automated CI workflow (`.github/workflows/ci.yml`).
 - [ ] Add valid `NEBIUS_API_KEY` and select active model in `.env` before live demonstration.
 - [ ] Record and upload 2-3 minute YouTube demonstration video (see `docs/DEMO_SCRIPT.md`).

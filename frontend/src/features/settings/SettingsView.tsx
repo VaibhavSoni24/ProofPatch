@@ -186,9 +186,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, onRefresh })
 PROOFPATCH_MODE=live
 
 # 2. Add Nebius Token Factory Credentials & NVIDIA Model
-# (Select active eligible model identifier from tokenfactory.nebius.com/models)
+# (Select an active eligible NVIDIA model from https://docs.tokenfactory.nebius.com/ or https://tokenfactory.nebius.com/models)
 NEBIUS_API_KEY=your_actual_nebius_api_key_here
-NEBIUS_MODEL=nvidia/nemotron-4-340b-instruct
+NEBIUS_MODEL=nvidia/<selected-active-model-id>
 
 # 3. Choose Execution Sandbox Backend
 # Options: "docker" (local daemon) or "token_factory_sandbox" (Nebius ConTree)
