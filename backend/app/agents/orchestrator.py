@@ -7,7 +7,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.agents.patch_parser import apply_patch_to_workspace, validate_patch_security
+from app.agents.patch_parser import validate_patch_security
 from app.agents.prompts import (
     DIAGNOSIS_SYSTEM_PROMPT,
     PATCH_SYSTEM_PROMPT,
@@ -16,7 +16,10 @@ from app.agents.prompts import (
     build_diagnosis_user_prompt,
     build_patch_user_prompt,
 )
-from app.agents.verification import perform_independent_verification
+from app.agents.verification import (
+    classify_baseline_reproduction,
+    perform_independent_verification,
+)
 from app.core.config import get_settings
 from app.core.logging import logger
 from app.db.models import RunModel
@@ -123,29 +126,91 @@ async def execute_live_run(
         run.reproduction_output = repro_res.output
         run.pre_patch_test_output = repro_res.output
         run.pre_patch_exit_code = repro_res.exit_code
-        run.reproduced = repro_res.exit_code != 0
+        repro_status, repro_reason = classify_baseline_reproduction(
+            exit_code=repro_res.exit_code,
+            output=repro_res.output,
+            bug_title=request.bug_title,
+            bug_description=request.bug_description,
+            reproduction_instructions=getattr(request, "reproduction_instructions", ""),
+            timed_out=repro_res.timed_out,
+        )
+
+        run.reproduced = repro_status == "PASSED"
         db.commit()
 
-        if run.reproduced:
-            log_stage_event(
-                db,
-                run_id,
-                "reproduce",
-                "completed",
-                f"Defect reproduced! Baseline tests failed with exit code {repro_res.exit_code}.",
-                {"exit_code": repro_res.exit_code},
-            )
-        else:
+        if repro_status != "PASSED":
             log_stage_event(
                 db,
                 run_id,
                 "reproduce",
                 "failed",
-                "Reproduction inconclusive: baseline tests passed cleanly (exit code 0).",
+                f"Reproduction halted ({repro_status}): {repro_reason}",
+                {"exit_code": repro_res.exit_code, "status": repro_status},
             )
-            run.status = "inconclusive"
+            run.status = "inconclusive" if repro_status == "INCONCLUSIVE" else "failed"
             db.commit()
+
+            # Perform independent verification audit reflecting the failure/inconclusiveness
+            is_verified, checks = perform_independent_verification(
+                patch_diff="",
+                modified_files=[],
+                pre_patch_exit_code=run.pre_patch_exit_code,
+                post_patch_exit_code=None,
+                pre_patch_output=run.pre_patch_test_output or "",
+                post_patch_output="",
+                workspace_dir=workspace_path,
+                bug_title=request.bug_title,
+                bug_description=request.bug_description,
+                reproduction_instructions=getattr(request, "reproduction_instructions", ""),
+                timed_out=repro_res.timed_out,
+            )
+            run.verified = False
+            db.commit()
+
+            test_records = [
+                TestRecord(
+                    stage="pre_patch",
+                    command=repro_cmd,
+                    exit_code=run.pre_patch_exit_code,
+                    passed=(run.pre_patch_exit_code == 0)
+                    if run.pre_patch_exit_code is not None
+                    else None,
+                    test_status=repro_status,
+                    output_summary=repro_reason,
+                ),
+                TestRecord(
+                    stage="post_patch",
+                    command=repro_cmd,
+                    exit_code=None,
+                    passed=None,
+                    test_status="NOT_RUN",
+                    output_summary="Post-patch regression test skipped because baseline reproduction was not established.",
+                ),
+            ]
+            persist_evidence_report(
+                db=db,
+                run=run,
+                verification_checks=checks,
+                tests=test_records,
+                tavily_research=None,
+            )
+            log_stage_event(
+                db,
+                run_id,
+                "report",
+                "completed",
+                f"Evidence report compiled reflecting baseline reproduction outcome ({repro_status}).",
+            )
             return run
+
+        log_stage_event(
+            db,
+            run_id,
+            "reproduce",
+            "completed",
+            f"Defect reproduced! {repro_reason}",
+            {"exit_code": repro_res.exit_code, "status": repro_status},
+        )
 
         # Stage 4: Optional Research via Tavily
         tavily_data = None
@@ -275,7 +340,7 @@ async def execute_live_run(
 
         patch_diff = strip_markdown_fences(patch_res.content)
         validate_patch_security(patch_diff)
-        modified = await asyncio.to_thread(apply_patch_to_workspace, workspace_path, patch_diff)
+        modified = await sandbox.apply_patch(patch_diff, workspace_path)
 
         run.patch_diff = patch_diff
         run.modified_files = json.dumps(modified)
@@ -376,9 +441,7 @@ Generate a revised, corrected unified diff to fix this error."""
 
                 revised_diff = strip_markdown_fences(repair_res.content)
                 validate_patch_security(revised_diff)
-                modified = await asyncio.to_thread(
-                    apply_patch_to_workspace, workspace_path, revised_diff
-                )
+                modified = await sandbox.apply_patch(revised_diff, workspace_path)
                 run.patch_diff = revised_diff
                 run.modified_files = json.dumps(modified)
                 db.commit()
@@ -399,6 +462,10 @@ Generate a revised, corrected unified diff to fix this error."""
             pre_patch_output=run.pre_patch_test_output or "",
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
+            bug_title=request.bug_title,
+            bug_description=request.bug_description,
+            reproduction_instructions=getattr(request, "reproduction_instructions", ""),
+            timed_out=repro_res.timed_out,
         )
 
         run.verified = is_verified

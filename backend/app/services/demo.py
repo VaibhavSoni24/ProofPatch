@@ -267,9 +267,12 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
             modified_files=modified,
             pre_patch_exit_code=run.pre_patch_exit_code or 1,
             post_patch_exit_code=run.post_patch_exit_code or 0,
+            pre_patch_output=run.pre_patch_test_output or "",
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
             original_repo_dir=bundled_source,
+            bug_title=run.bug_title,
+            bug_description=run.bug_description,
         )
 
         run.verified = is_verified

@@ -150,14 +150,16 @@ async def test_orchestrator_handles_provider_error_gracefully(db_session, tmp_pa
     mock_backend = AsyncMock()
     mock_backend.backend_name = "mock_sandbox"
 
-    # Baseline tests fail (defect reproduced)
+    # Baseline tests fail with correlated defect trace
     mock_backend.execute_tests.return_value = AsyncMock(
-        exit_code=1, output="AssertionError: Defect"
+        exit_code=1,
+        output="FAILED tests/test_auth.py::test_auth_failure - AssertionError: Authentication error\n=== 1 failed ===",
+        timed_out=False,
     )
 
     request = RunCreateRequest(
         repository_url="https://github.com/VaibhavSoni24/ProofPatch",
-        bug_title="Defect with failed AI auth",
+        bug_title="Authentication defect in auth module",
         bug_description="Authentication failure test",
         mode="live",
         confirm_live_execution=True,
@@ -179,3 +181,124 @@ async def test_orchestrator_handles_provider_error_gracefully(db_session, tmp_pa
 
             assert run.status == "failed"
             assert "Authentication failed" in (run.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stops_on_unrelated_baseline_failure(db_session, tmp_path):
+    """Test orchestrator halts without model calls when baseline failure is unrelated to reported bug."""
+    mock_nebius = AsyncMock()
+    mock_tavily = AsyncMock()
+    mock_backend = AsyncMock()
+    mock_backend.backend_name = "mock_sandbox"
+
+    # Failing test is in telemetry, but bug is in billing
+    mock_backend.execute_tests.return_value = AsyncMock(
+        exit_code=1,
+        output="FAILED tests/test_telemetry.py::test_telemetry_flush - ConnectionError\n=== 1 failed ===",
+        timed_out=False,
+    )
+
+    request = RunCreateRequest(
+        repository_url="https://github.com/VaibhavSoni24/ProofPatch",
+        bug_title="Billing discount rounding precision error",
+        bug_description="Discount calculation rounds down incorrectly",
+        mode="live",
+        confirm_live_execution=True,
+    )
+
+    with patch("app.agents.orchestrator.clone_public_repository", return_value="ghi789"):
+        with patch("app.agents.orchestrator.inspect_repository") as mock_inspect:
+            mock_inspect.return_value = MagicMock(
+                source_files=[], test_files=[], total_files=0, context_files_content={}
+            )
+
+            run = await execute_live_run(
+                db=db_session,
+                request=request,
+                nebius_provider=mock_nebius,
+                tavily_provider=mock_tavily,
+                execution_backend=mock_backend,
+            )
+
+            assert run.status == "inconclusive"
+            assert run.reproduced is False
+            assert run.model_call_count == 0
+            assert mock_nebius.generate_completion.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stops_on_import_or_collection_error(db_session, tmp_path):
+    """Test orchestrator halts when baseline test has syntax/collection or missing module error."""
+    mock_nebius = AsyncMock()
+    mock_backend = AsyncMock()
+    mock_backend.backend_name = "mock_sandbox"
+
+    mock_backend.execute_tests.return_value = AsyncMock(
+        exit_code=2,
+        output="ModuleNotFoundError: No module named 'scipy'\nno tests collected",
+        timed_out=False,
+    )
+
+    request = RunCreateRequest(
+        repository_url="https://github.com/VaibhavSoni24/ProofPatch",
+        bug_title="Missing dependency issue",
+        bug_description="Module not found during baseline",
+        mode="live",
+        confirm_live_execution=True,
+    )
+
+    with patch("app.agents.orchestrator.clone_public_repository", return_value="jkl012"):
+        with patch("app.agents.orchestrator.inspect_repository") as mock_inspect:
+            mock_inspect.return_value = MagicMock(
+                source_files=[], test_files=[], total_files=0, context_files_content={}
+            )
+
+            run = await execute_live_run(
+                db=db_session,
+                request=request,
+                nebius_provider=mock_nebius,
+                execution_backend=mock_backend,
+            )
+
+            assert run.status == "inconclusive"
+            assert run.reproduced is False
+            assert run.model_call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stops_on_timeout(db_session, tmp_path):
+    """Test orchestrator halts when baseline execution times out."""
+    mock_nebius = AsyncMock()
+    mock_backend = AsyncMock()
+    mock_backend.backend_name = "mock_sandbox"
+
+    mock_backend.execute_tests.return_value = AsyncMock(
+        exit_code=124,
+        output="Command timed out after 60s",
+        timed_out=True,
+    )
+
+    request = RunCreateRequest(
+        repository_url="https://github.com/VaibhavSoni24/ProofPatch",
+        bug_title="Timeout defect",
+        bug_description="Baseline execution times out",
+        mode="live",
+        confirm_live_execution=True,
+    )
+
+    with patch("app.agents.orchestrator.clone_public_repository", return_value="mno345"):
+        with patch("app.agents.orchestrator.inspect_repository") as mock_inspect:
+            mock_inspect.return_value = MagicMock(
+                source_files=[], test_files=[], total_files=0, context_files_content={}
+            )
+
+            run = await execute_live_run(
+                db=db_session,
+                request=request,
+                nebius_provider=mock_nebius,
+                execution_backend=mock_backend,
+            )
+
+            assert run.status == "inconclusive"
+            assert run.reproduced is False
+            assert run.model_call_count == 0
