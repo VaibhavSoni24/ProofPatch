@@ -68,7 +68,9 @@ describe('ProofPatch Frontend Application', () => {
     expect(screen.getByText('AI repairs you can verify.')).toBeInTheDocument();
 
     // Zero-token demo banner
-    expect(screen.getByText('LOCAL DEMO MODE')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('LOCAL DEMO MODE')).toBeInTheDocument();
+    });
   });
 
   it('renders dashboard metrics and recent runs', async () => {
@@ -88,18 +90,26 @@ describe('ProofPatch Frontend Application', () => {
   it('switches navigation tabs to New Repair and Settings cleanly', async () => {
     render(<App />);
 
+    await waitFor(() => {
+      expect(screen.getByText('Total Repair Runs')).toBeInTheDocument();
+    });
+
     // Navigate to New Repair
     const newRepairBtn = screen.getByRole('button', { name: /New Repair/i });
     fireEvent.click(newRepairBtn);
 
-    expect(screen.getByText(/Initiate Verifiable Code Repair/i)).toBeInTheDocument();
-    expect(screen.getByText(/Bundled Demo Service/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/Initiate Verifiable Code Repair/i)).toBeInTheDocument();
+      expect(screen.getByText(/Bundled Demo Service/i)).toBeInTheDocument();
+    });
 
     // Navigate to Settings
     const settingsBtn = screen.getByRole('button', { name: /Settings/i });
     fireEvent.click(settingsBtn);
 
-    expect(screen.getByText(/System Configuration & Provider Status/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Nebius/i)[0]).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/System Configuration & Provider Status/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/Nebius/i)[0]).toBeInTheDocument();
+    });
   });
 });
