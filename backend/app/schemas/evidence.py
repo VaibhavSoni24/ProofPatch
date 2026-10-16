@@ -19,8 +19,9 @@ class TestRecord(BaseModel):
 
     stage: Literal["pre_patch", "post_patch", "reproduction"]
     command: str
-    exit_code: int
-    passed: bool
+    exit_code: Optional[int] = None
+    passed: Optional[bool] = None
+    test_status: Literal["PASSED", "FAILED", "NOT_RUN", "INCONCLUSIVE", "UNKNOWN"] = "NOT_RUN"
     output_summary: str
 
 

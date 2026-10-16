@@ -121,8 +121,13 @@ def generate_markdown_report(
         ]
     )
     for test in tests:
-        res_str = "Passed" if test.passed else "Failed"
-        lines.append(f"| `{test.stage}` | `{test.command}` | `{test.exit_code}` | **{res_str}** |")
+        res_str = (
+            test.test_status
+            if hasattr(test, "test_status") and test.test_status
+            else ("PASSED" if test.passed else ("FAILED" if test.passed is False else "NOT_RUN"))
+        )
+        exit_code_str = str(test.exit_code) if test.exit_code is not None else "N/A"
+        lines.append(f"| `{test.stage}` | `{test.command}` | `{exit_code_str}` | **{res_str}** |")
 
     lines.extend(
         [
