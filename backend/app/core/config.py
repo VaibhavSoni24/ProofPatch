@@ -62,8 +62,12 @@ class Settings(BaseSettings):
 
     @property
     def is_nebius_configured(self) -> bool:
-        """Return True only if Nebius API key and model are explicitly provided."""
-        return bool(self.nebius_api_key.strip() and self.nebius_model.strip())
+        """Return True only if Nebius API key and an eligible NVIDIA model are explicitly provided."""
+        return bool(
+            self.nebius_api_key.strip()
+            and self.nebius_model.strip()
+            and self.nebius_model.strip().startswith("nvidia/")
+        )
 
     @property
     def is_tavily_configured(self) -> bool:

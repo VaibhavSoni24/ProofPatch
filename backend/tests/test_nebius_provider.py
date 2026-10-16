@@ -28,6 +28,15 @@ async def test_nebius_missing_model_raises_error():
 
 
 @pytest.mark.asyncio
+async def test_nebius_non_nvidia_model_raises_error():
+    """Verify provider raises ConfigurationError if model identifier is not an eligible NVIDIA model."""
+    provider = NebiusTokenFactoryProvider(api_key="valid-key", model="openai/gpt-4")
+    with pytest.raises(ConfigurationError) as exc:
+        await provider.generate_completion(messages=[{"role": "user", "content": "hi"}])
+    assert "not an eligible NVIDIA model" in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_nebius_successful_completion_mocked():
     """Test successful completion using mocked OpenAI-compatible HTTP response."""
     mock_payload = {

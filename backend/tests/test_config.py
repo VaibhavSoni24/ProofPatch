@@ -22,6 +22,9 @@ def test_nebius_configuration_detection():
     s3 = Settings(nebius_api_key="real-key", nebius_model="nvidia/nemotron-4-340b-instruct")
     assert s3.is_nebius_configured is True
 
+    s4 = Settings(nebius_api_key="real-key", nebius_model="openai/gpt-4")
+    assert s4.is_nebius_configured is False
+
 
 def test_tavily_configuration_detection():
     """Verify Tavily requires both enabled flag and API key."""

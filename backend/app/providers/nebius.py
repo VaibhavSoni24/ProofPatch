@@ -37,6 +37,12 @@ class NebiusTokenFactoryProvider(BaseLLMProvider):
             raise ConfigurationError(
                 "Nebius model is not configured. Please specify an eligible NVIDIA model in NEBIUS_MODEL."
             )
+        if not self.model.startswith("nvidia/"):
+            raise ConfigurationError(
+                f"Configured model '{self.model}' is not an eligible NVIDIA model. "
+                "ProofPatch requires an eligible open-source NVIDIA model (starting with 'nvidia/') "
+                "from the Nebius Token Factory catalog."
+            )
 
     async def generate_completion(
         self,
