@@ -382,8 +382,12 @@ Generate a revised, corrected unified diff to fix this error."""
         is_verified, checks = perform_independent_verification(
             patch_diff=run.patch_diff or "",
             modified_files=json.loads(run.modified_files) if run.modified_files else [],
-            pre_patch_exit_code=run.pre_patch_exit_code if run.pre_patch_exit_code is not None else 1,
-            post_patch_exit_code=run.post_patch_exit_code if run.post_patch_exit_code is not None else 1,
+            pre_patch_exit_code=run.pre_patch_exit_code
+            if run.pre_patch_exit_code is not None
+            else 1,
+            post_patch_exit_code=run.post_patch_exit_code
+            if run.post_patch_exit_code is not None
+            else 1,
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
         )
