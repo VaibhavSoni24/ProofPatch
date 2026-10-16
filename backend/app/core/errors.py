@@ -41,6 +41,10 @@ class SecurityViolationError(ProofPatchError):
         super().__init__(f"Security violation: {message}", status_code=403)
 
 
+# Alias for concise import
+SecurityError = SecurityViolationError
+
+
 class PatchApplicationError(ProofPatchError):
     """Raised when applying a unified diff fails."""
 
@@ -68,8 +72,8 @@ class ExecutionTimeoutError(ProofPatchError):
 class DockerNotAvailableError(ProofPatchError):
     """Raised when Docker sandbox is required but daemon is unreachable."""
 
-    def __init__(self):
-        super().__init__(
-            "Docker is required for live external repository execution but the Docker daemon is unreachable.",
-            status_code=503,
-        )
+    def __init__(
+        self,
+        message: str = "Docker is required for live external repository execution but the Docker daemon is unreachable.",
+    ):
+        super().__init__(message, status_code=503)

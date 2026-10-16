@@ -19,6 +19,8 @@ class ConfigStatusResponse(BaseModel):
     tavily_enabled: bool
     tavily_configured: bool
     docker_available: bool
+    execution_backend: str = "docker"
+    token_factory_sandbox_configured: bool = False
     max_model_calls: int
     max_patch_iterations: int
     timeout_seconds: int

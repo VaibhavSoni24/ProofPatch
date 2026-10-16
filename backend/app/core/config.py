@@ -36,7 +36,9 @@ class Settings(BaseSettings):
     tavily_enabled: bool = False
 
     # Safety and execution limits
-    execution_backend: Literal["docker", "local"] = "docker"
+    execution_backend: Literal["demo", "docker", "token_factory_sandbox"] = "docker"
+    contree_token: str = ""
+    contree_base_url: str = "https://api.tokenfactory.nebius.com/sandboxes"
     allow_external_repositories: bool = False
     max_model_calls_per_run: int = 4
     max_patch_iterations: int = 2
@@ -67,6 +69,12 @@ class Settings(BaseSettings):
     def is_tavily_configured(self) -> bool:
         """Return True only if Tavily is enabled and API key is provided."""
         return bool(self.tavily_enabled and self.tavily_api_key.strip())
+
+    @property
+    def is_token_factory_sandbox_configured(self) -> bool:
+        """Return True if Token Factory Sandbox credentials exist."""
+        token = self.contree_token.strip() or self.nebius_api_key.strip()
+        return bool(token)
 
     def get_workspace_dir(self) -> Path:
         """Ensure and return the workspace root directory."""

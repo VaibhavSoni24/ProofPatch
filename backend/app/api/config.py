@@ -23,6 +23,8 @@ def get_config_status():
         tavily_enabled=settings.tavily_enabled,
         tavily_configured=settings.is_tavily_configured,
         docker_available=is_docker_available(),
+        execution_backend=settings.execution_backend,
+        token_factory_sandbox_configured=settings.is_token_factory_sandbox_configured,
         max_model_calls=settings.max_model_calls_per_run,
         max_patch_iterations=settings.max_patch_iterations,
         timeout_seconds=settings.sandbox_timeout_seconds,
