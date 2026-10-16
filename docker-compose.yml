@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_NAME=ProofPatch
+      - APP_ENV=development
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - PROOFPATCH_MODE=demo
+      - DATABASE_URL=sqlite:///./data/proofpatch.db
+      - WORKSPACE_ROOT=./data/workspaces
+    volumes:
+      - proofpatch-data:/app/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  proofpatch-data:

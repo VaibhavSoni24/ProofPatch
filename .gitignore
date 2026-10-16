@@ -1,0 +1,55 @@
+# Environments and Virtualenvs
+.venv/
+venv/
+ENV/
+env/
+*.env
+!.env.example
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Caches and runtime data
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.log
+
+# Application runtime database and workspaces
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+parts/
+var/
+sdist/
+*.egg-info/
+.installed.cfg
+*.egg
