@@ -1,0 +1,103 @@
+# ProofPatch Testing & Quality Assurance Guide
+
+ProofPatch enforces rigorous automated test coverage across both backend orchestration and frontend interfaces. Testing requires **zero external API credits**; all model inference and search providers are comprehensively tested using mocked HTTP responses.
+
+---
+
+## Test Suites Overview
+
+| Test Suite | Framework | Count | Purpose |
+|---|---|---|---|
+| **Backend Configuration** | `pytest` | 4 tests | Tests default demo mode, Nebius detection, Tavily detection, and secret exclusion. |
+| **Demo Workflow** | `pytest` | 1 test | End-to-end local reproduction, patching, regression pass, and evidence generation. |
+| **Git & Repositories** | `pytest` | 6 tests | Tests public GitHub URL parsing, credential rejection, scheme verification. |
+| **Nebius Provider** | `pytest` | 5 tests | Mocks OpenAI-compatible completions, 401 auth, 404 model errors, timeouts. |
+| **Tavily Provider** | `pytest` | 3 tests | Mocks search queries, disabled status, and network connection fallbacks. |
+| **Patch Parser & Security** | `pytest` | 6 tests | Path traversal rejection (`../`), diff size caps, clean hunk application. |
+| **Run Management API** | `pytest` | 5 tests | Endpoints for `/api/health`, `/api/config-status`, `/api/runs`, `/api/runs/demo`, 404 handling. |
+| **Deterministic Verifier** | `pytest` | 3 tests | Tests audit checks (reproduction proof, exit code checks, secret redaction). |
+| **Orchestrator Integration** | `pytest` | 1 test | Full live workflow execution using mocked Nebius and Tavily providers. |
+| **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
+| **Total Automated Tests** | | **37 tests** | **100% Pass Rate** |
+
+---
+
+## Running Backend Tests
+
+### Windows PowerShell:
+```powershell
+# Activate virtual environment
+.venv\Scripts\Activate.ps1
+
+# Run full pytest suite with verbose output
+pytest backend/tests -v
+```
+
+### Linux / macOS:
+```bash
+source .venv/bin/activate
+pytest backend/tests -v
+```
+
+### Run Specific Test Modules:
+```bash
+# Provider mocked tests
+pytest backend/tests/test_nebius_provider.py -v
+pytest backend/tests/test_tavily_provider.py -v
+
+# Patch parser and security checks
+pytest backend/tests/test_patch_parser.py -v
+```
+
+---
+
+## Running Frontend Tests & Build
+
+From the `frontend/` directory:
+
+```bash
+cd frontend
+
+# Run Vitest test suite
+npm test
+
+# Run TypeScript typecheck
+npm run typecheck
+
+# Run Production Vite Build
+npm run build
+```
+
+---
+
+## Code Quality & Linting Checks
+
+### Python (Ruff):
+```bash
+# Check code style and imports
+ruff check backend
+
+# Verify formatting
+ruff format --check backend
+```
+
+### Frontend (TypeScript):
+```bash
+npm run typecheck
+```
+
+---
+
+## Running the Automated Full Verification Script
+
+You can run the end-to-end check script to validate both backend and frontend suites with one command:
+
+### Windows PowerShell:
+```powershell
+./scripts/check.ps1
+```
+
+### Linux / macOS:
+```bash
+./scripts/check.sh
+```
