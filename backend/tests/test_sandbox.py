@@ -1,10 +1,16 @@
 """Unit tests for execution backend interface and sandboxes."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.core.errors import ConfigurationError, DockerNotAvailableError, SecurityError
+from app.core.errors import (
+    ConfigurationError,
+    DockerNotAvailableError,
+    ProviderError,
+    SecurityError,
+)
 from app.sandbox.docker_backend import DockerExecutionBackend
 from app.sandbox.factory import get_execution_backend
 from app.sandbox.local_runner import LocalExecutionBackend
@@ -69,15 +75,18 @@ async def test_token_factory_sandbox_lifecycle_mocked(tmp_path):
     mock_image.stdout = "5 passed in 0.10s"
     mock_image.stderr = ""
     mock_image.run.return_value = mock_image
-    mock_image.apply_files.return_value = mock_image
 
     mock_client = AsyncMock()
     mock_client.images.use.return_value = mock_image
+
+    mock_api_client = AsyncMock()
+    mock_api_client.close = AsyncMock()
 
     backend = TokenFactorySandboxBackend(
         token="test-token",
         base_url="https://api.tokenfactory.nebius.com/sandboxes",
         client=mock_client,
+        api_client=mock_api_client,
     )
 
     # 1. Execute tests (triggers session acquisition, transfer_workspace, then execute_tests)
@@ -90,8 +99,8 @@ async def test_token_factory_sandbox_lifecycle_mocked(tmp_path):
 
     # Verify images.use was called with base image
     mock_client.images.use.assert_called_once_with("python:3.11-slim", strict=True)
-    # Verify apply_files was called to transfer repository
-    mock_image.apply_files.assert_called()
+    # Verify image.run was called for transfer and execution
+    assert mock_image.run.call_count >= 2
 
     # 2. Test apply_patch
     patch_diff = """--- a/src/sample.py
@@ -104,11 +113,99 @@ async def test_token_factory_sandbox_lifecycle_mocked(tmp_path):
     assert "src/sample.py" in modified
     assert sample_file.read_text(encoding="utf-8") == "print('patched')\n"
 
-    # 3. Cleanup session
+    # 3. Cleanup session - closes client and resets state
     await backend.cleanup()
+    mock_api_client.close.assert_called_once()
     assert backend._remote_image is None
     assert backend._client is None
+    assert backend._api_client is None
     assert backend._files_transferred is False
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_valid_zero_exit_code(tmp_path):
+    """Verify Token Factory sandbox correctly records valid zero exit code."""
+    mock_image = AsyncMock()
+    mock_image.exit_code = 0
+    mock_image.stdout = "3 passed in 0.05s"
+    mock_image.stderr = ""
+    mock_image.run.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    res = await backend.execute_tests(tmp_path)
+    assert res.exit_code == 0
+    assert "3 passed" in res.output
+    assert res.timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_genuine_nonzero_exit_code(tmp_path):
+    """Verify Token Factory sandbox preserves real nonzero test failure exit code."""
+    mock_image = AsyncMock()
+    mock_image.exit_code = 1
+    mock_image.stdout = (
+        "FAILED tests/test_calc.py::test_boundary - AssertionError: 6 != 8\n1 failed in 0.02s"
+    )
+    mock_image.stderr = ""
+    mock_image.run.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    res = await backend.execute_tests(tmp_path)
+    assert res.exit_code == 1
+    assert "AssertionError: 6 != 8" in res.output
+    assert res.timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_missing_exit_code_rejected(tmp_path):
+    """Verify Token Factory sandbox rejects missing exit code and never defaults to 0."""
+    mock_image = AsyncMock()
+    mock_image.exit_code = None
+    mock_image.stdout = "some output"
+    mock_image.stderr = ""
+    mock_image.run.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    with pytest.raises(ProviderError, match="without an exit code"):
+        await backend.execute_tests(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_invalid_exit_code_rejected(tmp_path):
+    """Verify Token Factory sandbox rejects malformed exit code."""
+    mock_image = AsyncMock()
+    mock_image.exit_code = "INVALID_CODE"
+    mock_image.stdout = "some output"
+    mock_image.stderr = ""
+    mock_image.run.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    with pytest.raises(ProviderError, match="malformed exit code"):
+        await backend.execute_tests(tmp_path)
 
 
 @pytest.mark.asyncio
@@ -119,25 +216,65 @@ async def test_token_factory_sandbox_timeout_handling(tmp_path):
     mock_image.stdout = ""
     mock_image.stderr = "Command timed out"
     mock_image.run.return_value = mock_image
-    mock_image.apply_files.return_value = mock_image
 
     mock_client = AsyncMock()
     mock_client.images.use.return_value = mock_image
 
     backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
     res = await backend.execute_tests(tmp_path)
     assert res.exit_code == 124
     assert res.timed_out is True
 
 
 @pytest.mark.asyncio
+async def test_token_factory_sandbox_asyncio_timeout(tmp_path):
+    """Verify Token Factory sandbox handles asyncio TimeoutError cleanly."""
+    mock_image = AsyncMock()
+    mock_image.run.side_effect = asyncio.TimeoutError()
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    res = await backend.execute_tests(tmp_path, timeout_seconds=10)
+    assert res.exit_code == 124
+    assert res.timed_out is True
+    assert "timed out after 10s" in res.output
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_missing_stdout_or_stderr(tmp_path):
+    """Verify Token Factory sandbox handles None stdout or stderr without error."""
+    mock_image = AsyncMock()
+    mock_image.exit_code = 0
+    mock_image.stdout = None
+    mock_image.stderr = None
+    mock_image.run.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    res = await backend.execute_tests(tmp_path)
+    assert res.exit_code == 0
+    assert res.stdout == ""
+    assert res.stderr == ""
+
+
+@pytest.mark.asyncio
 async def test_token_factory_sandbox_execution_error(tmp_path):
     """Verify Token Factory sandbox raises ProviderError on remote execution exception."""
-    from app.core.errors import ProviderError
-
     mock_image = AsyncMock()
     mock_image.run.side_effect = RuntimeError("ConTree container lost connection")
-    mock_image.apply_files.return_value = mock_image
 
     mock_client = AsyncMock()
     mock_client.images.use.return_value = mock_image
@@ -153,8 +290,6 @@ async def test_token_factory_sandbox_execution_error(tmp_path):
 @pytest.mark.asyncio
 async def test_token_factory_sandbox_transfer_error(tmp_path):
     """Verify Token Factory sandbox raises ProviderError on workspace transfer exception."""
-    from app.core.errors import ProviderError
-
     mock_image = AsyncMock()
     mock_image.run.side_effect = RuntimeError("Disk quota exceeded")
 
@@ -164,6 +299,56 @@ async def test_token_factory_sandbox_transfer_error(tmp_path):
     backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
     with pytest.raises(ProviderError, match="Failed to transfer workspace"):
         await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_dependency_bootstrap_failure(tmp_path):
+    """Verify Token Factory sandbox raises ProviderError when container dependency setup fails."""
+    mock_image = AsyncMock()
+    # First run succeeds (mkdir), second run (pip install) fails with exit code 1
+    call_count = 0
+
+    async def mock_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        img = AsyncMock()
+        img.run = mock_run
+        if call_count >= 2:
+            img.exit_code = 1
+            img.stderr = "ERROR: Could not find a version that satisfies the requirement"
+            img.stdout = ""
+        else:
+            img.exit_code = 0
+            img.stderr = ""
+            img.stdout = ""
+        return img
+
+    mock_image.run = mock_run
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="dependency installation failed"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_api_client_lifecycle_and_cleanup():
+    """Verify ContreeAsyncClient instantiation and clean resource disposal during cleanup."""
+    backend = TokenFactorySandboxBackend(
+        token="test-token",
+        base_url="https://api.tokenfactory.nebius.com/sandboxes",
+    )
+    api_client = await backend._get_api_client()
+    assert api_client is not None
+    assert hasattr(api_client, "close")
+
+    # Cleanup releases client and awaits close
+    with patch.object(api_client, "close", new_callable=AsyncMock) as mock_close:
+        await backend.cleanup()
+        mock_close.assert_called_once()
+    assert backend._api_client is None
 
 
 def test_token_factory_sandbox_no_silent_host_fallback():
