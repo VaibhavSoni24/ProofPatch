@@ -1,6 +1,6 @@
 """Unit tests for execution backend interface and sandboxes."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -58,46 +58,116 @@ async def test_token_factory_sandbox_requires_credentials(tmp_path):
 
 @pytest.mark.asyncio
 async def test_token_factory_sandbox_lifecycle_mocked(tmp_path):
-    """Verify complete Token Factory sandbox lifecycle (session acquisition, execution, cleanup) with mocked HTTP."""
-    backend = TokenFactorySandboxBackend(
-        token="test-token", base_url="https://api.tokenfactory.nebius.com/sandboxes"
-    )
+    """Verify complete Token Factory sandbox lifecycle (session acquisition, transfer, exec, patch, cleanup) with mocked ConTree SDK."""
+    # Create sample repository files in tmp_path
+    sample_file = tmp_path / "src" / "sample.py"
+    sample_file.parent.mkdir(parents=True, exist_ok=True)
+    sample_file.write_text("print('initial')", encoding="utf-8")
+
+    mock_image = AsyncMock()
+    mock_image.exit_code = 0
+    mock_image.stdout = "5 passed in 0.10s"
+    mock_image.stderr = ""
+    mock_image.run.return_value = mock_image
+    mock_image.apply_files.return_value = mock_image
 
     mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
 
-    # Session create response
-    mock_post_session = MagicMock(status_code=201)
-    mock_post_session.json.return_value = {"session_id": "session_test_123"}
+    backend = TokenFactorySandboxBackend(
+        token="test-token",
+        base_url="https://api.tokenfactory.nebius.com/sandboxes",
+        client=mock_client,
+    )
 
-    # Exec command response
-    mock_post_exec = MagicMock(status_code=200)
-    mock_post_exec.json.return_value = {
-        "exit_code": 0,
-        "stdout": "5 passed in 0.10s",
-        "stderr": "",
-    }
+    # 1. Execute tests (triggers session acquisition, transfer_workspace, then execute_tests)
+    res = await backend.execute_tests(tmp_path)
+    assert res.exit_code == 0
+    assert "5 passed" in res.output
+    assert res.timed_out is False
+    assert backend._remote_image is not None
+    assert backend._files_transferred is True
 
-    # Delete cleanup response
-    mock_delete = MagicMock(status_code=204)
+    # Verify images.use was called with base image
+    mock_client.images.use.assert_called_once_with("python:3.11-slim", strict=True)
+    # Verify apply_files was called to transfer repository
+    mock_image.apply_files.assert_called()
 
-    async def mock_post(url, *args, **kwargs):
-        if "exec" in url:
-            return mock_post_exec
-        return mock_post_session
+    # 2. Test apply_patch
+    patch_diff = """--- a/src/sample.py
++++ b/src/sample.py
+@@ -1 +1 @@
+-print('initial')
++print('patched')
+"""
+    modified = await backend.apply_patch(patch_diff, tmp_path)
+    assert "src/sample.py" in modified
+    assert sample_file.read_text(encoding="utf-8") == "print('patched')\n"
 
-    mock_client.post.side_effect = mock_post
-    mock_client.delete.return_value = mock_delete
-    mock_client.__aenter__.return_value = mock_client
-    mock_client.__aexit__.return_value = None
+    # 3. Cleanup session
+    await backend.cleanup()
+    assert backend._remote_image is None
+    assert backend._client is None
+    assert backend._files_transferred is False
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
-        # 1. Execute tests (triggers session acquire then exec)
-        res = await backend.execute_tests(tmp_path)
-        assert res.exit_code == 0
-        assert "5 passed" in res.output
-        assert backend.session_id == "session_test_123"
 
-        # 2. Cleanup session
-        await backend.cleanup()
-        assert backend.session_id is None
-        mock_client.delete.assert_called_once()
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_timeout_handling(tmp_path):
+    """Verify Token Factory sandbox flags timed out commands correctly."""
+    mock_image = AsyncMock()
+    mock_image.exit_code = 124
+    mock_image.stdout = ""
+    mock_image.stderr = "Command timed out"
+    mock_image.run.return_value = mock_image
+    mock_image.apply_files.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    res = await backend.execute_tests(tmp_path)
+    assert res.exit_code == 124
+    assert res.timed_out is True
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_execution_error(tmp_path):
+    """Verify Token Factory sandbox raises ProviderError on remote execution exception."""
+    from app.core.errors import ProviderError
+
+    mock_image = AsyncMock()
+    mock_image.run.side_effect = RuntimeError("ConTree container lost connection")
+    mock_image.apply_files.return_value = mock_image
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    backend._remote_image = mock_image
+    backend._files_transferred = True
+
+    with pytest.raises(ProviderError, match="ConTree execution failed"):
+        await backend.execute_tests(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_transfer_error(tmp_path):
+    """Verify Token Factory sandbox raises ProviderError on workspace transfer exception."""
+    from app.core.errors import ProviderError
+
+    mock_image = AsyncMock()
+    mock_image.run.side_effect = RuntimeError("Disk quota exceeded")
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="Failed to transfer workspace"):
+        await backend.transfer_workspace(tmp_path)
+
+
+def test_token_factory_sandbox_no_silent_host_fallback():
+    """Verify that when token_factory_sandbox is configured, it never resolves to host LocalExecutionBackend."""
+    backend = get_execution_backend(mode="live", backend_override="token_factory_sandbox")
+    assert not isinstance(backend, LocalExecutionBackend)
+    assert backend.backend_name == "token_factory_sandbox"

@@ -34,6 +34,16 @@ class BaseExecutionBackend(ABC):
         """Execute test suite in isolated environment and return execution results."""
         raise NotImplementedError
 
+    async def transfer_workspace(self, workspace_dir: Path) -> None:
+        """Transfer repository files into the isolated sandbox environment."""
+        pass
+
+    async def apply_patch(self, patch_diff: str, workspace_dir: Path) -> List[str]:
+        """Apply patch inside the sandbox environment and return modified files."""
+        from app.agents.patch_parser import apply_patch_to_workspace
+
+        return apply_patch_to_workspace(workspace_dir, patch_diff)
+
     async def cleanup(self) -> None:
         """Release any remote or local resources associated with this session."""
         pass
