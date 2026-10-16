@@ -57,7 +57,7 @@ This document provides a comprehensive reference for all configuration options a
 
 ProofPatch never fabricates verification results or assumes success without evidence:
 
-- **`PASSED`**: Claim is backed by verified execution output and exit code 0 (with zero failure indicators).
+- **`PASSED`**: Claim is backed by verified execution output and valid exit code 0 (with zero failure indicators). Missing or unavailable exit codes are strictly rejected and never treated as passing.
 - **`FAILED`**: Explicit test failure, patch rejection, or baseline defect not reproduced (exit code 0).
-- **`NOT_RUN`**: The stage or check was not executed (e.g., post-patch tests never ran because pre-patch reproduction failed).
-- **`INCONCLUSIVE`**: Baseline tests exited non-zero or failed to execute, but output revealed an environmental error (e.g. missing dependency, collection error, timeout, or unrelated test failure) rather than reproducible proof connecting to the reported defect.
+- **`NOT_RUN`**: The stage or check was not executed (e.g., post-patch tests never ran because pre-patch reproduction failed, or sandbox execution returned no exit code).
+- **`INCONCLUSIVE`**: Baseline tests exited non-zero or failed to execute, but output revealed an environmental error (e.g. missing dependency, collection error, timeout, or unrelated test failure) rather than reproducible proof connecting to the reported defect. A nonzero exit code alone is not proof of defect reproduction.

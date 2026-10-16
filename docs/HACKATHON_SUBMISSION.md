@@ -58,14 +58,16 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 
 ## 6. Official Token Factory Sandbox Integration (Nebius ConTree)
 
-- **Architecture**: `TokenFactorySandboxBackend` integrates using the official `contree-sdk` (`Contree`, `ContreeImage`).
+- **Architecture**: `TokenFactorySandboxBackend` integrates using official `contree-sdk` and `contree-client` (`ContreeAsyncClient`, `Contree`, `ContreeImage`, `UploadFileSpec`).
 - **Lifecycle Implementation**:
+  - Client construction: initializes configured `ContreeAsyncClient` (with token, base URL, timeout, and retry policy) from `contree_client.httpx` and passes it into `Contree(api_client)`.
   - Image acquisition via `client.images.use("python:3.11-slim", strict=True)`.
-  - Workspace file transfer: scans bounded repository contents and pushes files into the remote container via `image.apply_files()`, followed by dependency setup (`pip install pytest`).
-  - Command execution via `image.run()` with state preservation (`disposable=False`) across commands.
-  - Patch synchronization: applies unified diff to local working copy and uploads modified files to container via `image.apply_files()`.
-  - Resource disposal and session cleanup on completion.
-- **Verification Status**: Validated with mock SDK tests covering container acquisition, file transfer, patch synchronization, timeouts, and error handling. Requires live `CONTREE_TOKEN` or `NEBIUS_API_KEY` for live cloud execution.
+  - Workspace file transfer: scans bounded repository files and transfers them into the remote container via `UploadFileSpec` in `image.run(shell="mkdir -p /workspace", files=upload_specs, disposable=False)`, followed by containerized dependency setup (`requirements.txt`, `pyproject.toml`, `setup.py` + `pytest`).
+  - Command execution via `image.run(cwd="/workspace", disposable=False)` with state preservation across subsequent commands.
+  - Strict outcome verification: extracts genuine exit codes, rejecting missing, null, or malformed exit codes to prevent false-positive test claims.
+  - Patch synchronization: applies unified diff to local working copy and uploads modified files to container via `UploadFileSpec` in `image.run()`.
+  - Explicit resource cleanup: awaits `api_client.close()` and releases remote container sessions upon run completion.
+- **Verification Status**: Validated with comprehensive mock SDK unit tests covering client instantiation, container acquisition, file transfer, patch synchronization, timeouts, nonzero exit codes, missing exit code rejection, and cleanup. Requires live `CONTREE_TOKEN` or `NEBIUS_API_KEY` for live cloud execution.
 
 ---
 
@@ -86,9 +88,9 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 - [x] MIT License and Security Policy.
 - [x] Functional zero-credential deterministic demo mode.
 - [x] Nebius Token Factory adapter with eligible NVIDIA model configuration.
-- [x] Nebius ConTree Token Factory sandbox adapter implementation via official `contree-sdk`.
+- [x] Nebius ConTree Token Factory sandbox adapter implementation via official `contree-sdk` and `contree-client`.
 - [x] Tavily Search API research integration.
-- [x] Passing backend tests (61 tests) and frontend tests (3 tests) — 64 automated tests total.
+- [x] Passing backend tests (69 tests) and frontend tests (3 tests) — 72 automated tests total.
 - [x] Automated CI workflow (`.github/workflows/ci.yml`).
 - [ ] Add valid `NEBIUS_API_KEY` and select active model in `.env` before live demonstration.
 - [ ] Record and upload 2-3 minute YouTube demonstration video (see `docs/DEMO_SCRIPT.md`).

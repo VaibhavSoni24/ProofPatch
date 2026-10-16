@@ -8,7 +8,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](backend/)
 [![React: 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
-[![Tests: 49 Passed](https://img.shields.io/badge/Tests-49%20Passed-10B981)](docs/TESTING.md)
+[![Tests: 72 Passed](https://img.shields.io/badge/Tests-72%20Passed-10B981)](docs/TESTING.md)
 
 ---
 
@@ -42,10 +42,10 @@ ProofPatch transforms bug fixing from an ungrounded chat interaction into a **tr
 
 ## Key Differentiators
 
-- **Observable Evidence Workflow**: Every claim is backed by real executed commands, timestamps, and exit codes. Never presents a generated explanation as a success without executable proof.
+- **Observable Evidence Workflow**: Every claim is backed by real executed commands, timestamps, and exit codes. Never presents a generated explanation as a success without executable proof. Missing exit codes are strictly rejected and never defaulted to success.
 - **Zero-Credit Offline Demonstration**: Ships with a deterministic local demo featuring an intentionally buggy SaaS billing service (`examples/buggy-python-service/`). Runs out of the box on an ordinary laptop with zero API keys or cloud GPUs.
 - **Nebius Token Factory Adapter**: Fully asynchronous OpenAI-compatible adapter targeting eligible open-source **NVIDIA** reasoning models.
-- **Nebius ConTree Sandbox Integration**: Uses official `contree-sdk` for isolated cloud container sessions, transferring bounded repository files, applying patches, and executing tests with state preservation across commands.
+- **Nebius ConTree Sandbox Integration**: Uses official `contree-sdk` and `contree-client` (`ContreeAsyncClient`, `Contree`, `UploadFileSpec`) for isolated cloud container sessions, transferring bounded repository files via `image.run(files=[...], disposable=False)`, installing manifest dependencies in-container, enforcing strict exit code validation, and releasing resources cleanly upon completion.
 - **Tavily Research Integration**: Targeted asynchronous search retrieving real documentation, change logs, and technical discussions.
 - **Strict Sandbox Boundaries**: Disposable workspace checkouts, environment sanitization (secrets stripped from subprocesses), path traversal rejection (`../`), and container isolation.
 

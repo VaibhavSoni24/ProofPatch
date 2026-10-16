@@ -15,11 +15,11 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | **Tavily Provider** | `pytest` | 3 tests | Mocks search queries, disabled status, and network connection fallbacks. |
 | **Patch Parser & Security** | `pytest` | 6 tests | Path traversal rejection (`../`), diff size caps, clean hunk application. |
 | **Run Management API** | `pytest` | 5 tests | Endpoints for `/api/health`, `/api/config-status`, `/api/runs`, `/api/runs/demo`, 404 handling. |
-| **Execution Sandboxes** | `pytest` | 11 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree SDK lifecycle, file transfer, patch apply, timeouts, and error handling. |
+| **Execution Sandboxes** | `pytest` | 19 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree SDK lifecycle, client construction, UploadFileSpec file transfer, patch apply, valid zero exit codes, nonzero exit codes, missing exit code rejection, invalid exit code rejection, timeouts, and clean resource cleanup. |
 | **Deterministic Verifier** | `pytest` | 13 tests | Audits missing exit codes, inconclusive baseline tests, unrelated failures, import errors, collection errors, timeouts, contradictory post-patch outputs, and secrets. |
 | **Async Orchestrator Integration** | `pytest` | 6 tests | Full async workflow with mocked Nebius, Tavily, strict baseline gating on unrelated failures, collection errors, timeouts, and provider error handling. |
 | **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
-| **Total Automated Tests** | | **64 tests** | **100% Pass Rate** |
+| **Total Automated Tests** | | **72 tests** | **100% Pass Rate** |
 
 ---
 

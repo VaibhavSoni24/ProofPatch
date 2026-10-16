@@ -110,14 +110,14 @@ To prevent third-party code execution vulnerabilities, ProofPatch establishes th
 - Fails closed with actionable error if Docker daemon is unreachable.
 
 ### `TokenFactorySandboxBackend`
-- Official Nebius ConTree cloud container sandbox adapter using the official `contree-sdk` (`Contree`, `ContreeImage`).
+- Official Nebius ConTree cloud container sandbox adapter using official `contree-sdk` and `contree-client` (`ContreeAsyncClient`, `Contree`, `ContreeImage`, `UploadFileSpec`).
 - Lifecycle:
-  1. `acquire_session()`: acquires container image session from base image (`python:3.11-slim`) via `client.images.use(image, strict=True)`.
-  2. `transfer_workspace()`: scans and packages bounded repository contents and transfers them into the remote container via `image.apply_files()`, and sets up the test execution environment (`pip install pytest`).
-  3. `execute_tests()`: executes baseline and regression tests inside the container (`/workspace`) with state preservation (`disposable=False`) via `image.run()`.
-  4. `apply_patch()`: synchronizes surgical patch diffs directly into the remote container filesystem using `apply_files()`.
-  5. `cleanup()`: releases and destroys remote container sessions upon run completion.
-- Configured via `CONTREE_TOKEN` and `CONTREE_BASE_URL`.
+  1. `acquire_session()`: creates configured `ContreeAsyncClient` (with token, base URL, timeout, and retry policy) from `contree_client.httpx`, passes it into `Contree(api_client)`, and acquires a container session (`python:3.11-slim`) via `client.images.use(image, strict=True)`.
+  2. `transfer_workspace()`: scans bounded repository files, transfers them via `UploadFileSpec` in `image.run(shell="mkdir -p /workspace", files=upload_specs, disposable=False)`, and bootstraps project dependencies in-container using detected manifests (`requirements.txt`, `pyproject.toml`, `setup.py`) plus `pytest`.
+  3. `execute_tests()`: runs test commands inside the container (`/workspace`) with state preservation (`disposable=False`) via `image.run()`. Strictly extracts `exit_code`, rejects missing or malformed exit codes, and surfaces genuine stdout/stderr.
+  4. `apply_patch()`: applies diff locally, then synchronizes modified files to the remote container via `UploadFileSpec` in `image.run(shell="true", files=patch_specs, disposable=False)`.
+  5. `cleanup()`: explicitly awaits `api_client.close()`, disposing remote container sessions and network sockets upon run completion.
+- Configured via `CONTREE_TOKEN` and `CONTREE_BASE_URL`. Ensures the application remains fail-closed without silent fallback to the host.
 
 ---
 
