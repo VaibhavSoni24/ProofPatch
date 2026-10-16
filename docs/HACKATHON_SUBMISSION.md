@@ -25,37 +25,49 @@ Generative AI coding tools frequently suggest hallucinated or plausible-sounding
 
 ProofPatch bridges generative AI and software engineering rigor through an evidence-first workflow:
 
-1. **Observable Defect Reproduction**: Executes test commands in isolated workspaces before patching to prove the bug exists (Exit Code != 0).
-2. **Surgical Unified Diffs**: Synthesizes minimal diffs validated against path traversal (`../`) and strict size caps.
+1. **Observable Defect Reproduction**: Executes test commands in isolated workspaces before patching to prove the bug exists (Exit Code != 0). Halts as `INCONCLUSIVE` if tests pass or fail due to unrelated environment issues.
+2. **Surgical Unified Diffs**: Synthesizes minimal diffs validated against path traversal (`../`), protected files, and strict size caps.
 3. **Deterministic Verification Audit**: Independently evaluates 6 concrete claims (exit codes, diff syntax, scope confinement, immutability of original source, and secret scrubbing).
-4. **Zero-Token Local Demo**: Ships with an offline demo featuring an intentionally buggy SaaS billing service (Issue #104) that requires zero API keys or cloud hardware.
-5. **Downloadable Audit Artifacts**: Persists structured Markdown and JSON reports for compliance and code review.
+4. **Isolated Execution Backends**: Supports local Docker isolation (`--network none`, memory & CPU caps) and official Nebius ConTree cloud container sandboxes (`token_factory_sandbox`).
+5. **Zero-Token Local Demo**: Ships with an offline demo featuring an intentionally buggy SaaS billing service (Issue #104) that requires zero API keys or cloud hardware.
+6. **Downloadable Audit Artifacts**: Persists structured Markdown and JSON reports for compliance and code review.
 
 ---
 
 ## 4. Technical Architecture & Tech Stack
 
-- **Backend**: Python 3.10+, FastAPI, Pydantic, SQLAlchemy, SQLite, Pytest, Ruff.
+- **Backend**: Python 3.10+, FastAPI (fully asynchronous), Pydantic, SQLAlchemy, SQLite, Pytest, Ruff.
 - **Frontend**: React 19, TypeScript, Vite, custom responsive dark CSS design system, Lucide React icons, Vitest.
-- **Inference Integration**: OpenAI-compatible adapter for Nebius Token Factory.
-- **Search Integration**: Tavily Search API adapter for deep technical documentation retrieval.
-- **Execution Sandbox**: Subprocess runner with environment sanitization and Docker container isolation support (`--network none`, memory & CPU caps).
+- **Inference Integration**: Asynchronous OpenAI-compatible adapter for Nebius Token Factory with typed `ProviderResponse`.
+- **Search Integration**: Asynchronous Tavily Search API adapter for deep technical documentation retrieval with typed `SearchResponse`.
+- **Execution Sandboxes**: `LocalExecutionBackend` (demo only), `DockerExecutionBackend` (non-networked local container), and `TokenFactorySandboxBackend` (Nebius ConTree cloud container runtime).
 
 ---
 
 ## 5. Nebius Token Factory & NVIDIA Model Integration
 
 - **Endpoint**: `https://api.tokenfactory.nebius.com/v1/`
-- **Model Compatibility**: Designed for eligible NVIDIA open-source reasoning models from the Nebius catalog (e.g. `nvidia/nemotron-4-340b-instruct`).
+- **Model Compatibility**: Configurable via `NEBIUS_MODEL`. Designed for eligible open-source NVIDIA reasoning models from the Nebius Token Factory catalog (e.g. `nvidia/nemotron-4-340b-instruct` or current active Nemotron identifiers from `tokenfactory.nebius.com/models`).
 - **Adapter Design**:
-  - Implements `BaseLLMProvider` with structured completion handling.
+  - Implements `BaseLLMProvider` with asynchronous completion handling and token usage tracking.
   - Handles rate limits (429), authentication failures (401), insufficient credits (402), and model errors (404) with typed exceptions.
-  - Enforces strict execution limits (`MAX_MODEL_CALLS_PER_run=4`, `MAX_PATCH_ITERATIONS=2`) to prevent credit overconsumption.
-- **Verification Status**: Tested and validated locally using comprehensive HTTP mock test suites. Live execution requires entering a valid `NEBIUS_API_KEY` in the local `.env` file.
+  - Enforces strict execution limits (`MAX_MODEL_CALLS_PER_RUN=4`, `MAX_PATCH_ITERATIONS=2`) to prevent credit overconsumption.
+- **Verification Status**: Validated locally using comprehensive HTTP mock test suites. Live execution requires entering a valid `NEBIUS_API_KEY` and active `NEBIUS_MODEL` in `.env`.
 
 ---
 
-## 6. Tavily Search Integration (Best Use of Tavily)
+## 6. Official Token Factory Sandbox Integration (Nebius ConTree)
+
+- **Architecture**: `TokenFactorySandboxBackend` integrates with the Nebius ConTree container runtime API (`https://api.tokenfactory.nebius.com/sandboxes`).
+- **Lifecycle Implementation**:
+  - Session provisioning (`POST /sessions`) with `python:3.11-slim` base image.
+  - Test command execution (`POST /sessions/{id}/exec`) with timeout controls.
+  - Session cleanup and disposal (`DELETE /sessions/{id}`) upon run completion.
+- **Verification Status**: Tested with unit mocks for session lifecycle, command execution, and disposal. Runtime verification with live credentials will take place upon final hackathon deployment.
+
+---
+
+## 7. Tavily Search Integration (Best Use of Tavily)
 
 - **Role**: During the diagnosis phase, ProofPatch autonomously queries Tavily to retrieve official framework documentation, recent breaking changes, and relevant technical issues.
 - **Implementation**:
@@ -66,22 +78,16 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 
 ---
 
-## 7. Remaining User Actions Before Submission
+## 8. Hackathon Submission Checklist
 
-To transition from the offline demonstration to a genuine live submission:
-1. **Configure Nebius Credentials**:
-   Add your Nebius Token Factory API key and desired NVIDIA model to your untracked `.env`:
-   ```bash
-   PROOFPATCH_MODE=live
-   NEBIUS_API_KEY=your_actual_nebius_api_key
-   NEBIUS_MODEL=nvidia/nemotron-4-340b-instruct
-   ```
-2. **Configure Tavily Credentials**:
-   ```bash
-   TAVILY_API_KEY=your_actual_tavily_api_key
-   TAVILY_ENABLED=true
-   ```
-3. **Execute a Live Run**:
-   Launch a repair against a supported public GitHub repository with `confirm_live_execution=true`.
-4. **Record Demo Video**:
-   Follow [docs/DEMO_SCRIPT.md](file:///e:/Projects/ProofPatch/docs/DEMO_SCRIPT.md) to record the 2-minute walkthrough.
+- [x] Working open-source codebase with clean monorepo structure.
+- [x] MIT License and Security Policy.
+- [x] Functional zero-credential deterministic demo mode.
+- [x] Nebius Token Factory adapter with eligible NVIDIA model configuration.
+- [x] Nebius ConTree Token Factory sandbox adapter implementation.
+- [x] Tavily Search API research integration.
+- [x] Passing backend tests (46 tests) and frontend tests (3 tests).
+- [x] Automated CI workflow (`.github/workflows/ci.yml`).
+- [ ] Add valid `NEBIUS_API_KEY` and select active model in `.env` before live demonstration.
+- [ ] Record and upload 2-3 minute YouTube demonstration video (see `docs/DEMO_SCRIPT.md`).
+- [ ] Submit Devpost entry with public repository URL and video link.

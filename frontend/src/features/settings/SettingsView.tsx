@@ -91,28 +91,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, onRefresh })
             </p>
           </div>
 
-          {/* Card 4: Docker Sandbox */}
+          {/* Card 4: Sandbox Execution Backend */}
           <div style={{ background: 'var(--bg-card)', padding: '18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
               <Box size={18} color="var(--status-passed)" />
-              <strong style={{ fontSize: '0.95rem' }}>Docker Isolation</strong>
+              <strong style={{ fontSize: '0.95rem' }}>Sandbox Backend</strong>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              {config?.docker_available ? (
-                <span className="badge badge-passed">
-                  <CheckCircle2 size={12} />
-                  <span>Daemon Online</span>
-                </span>
-              ) : (
-                <span className="badge badge-neutral">
-                  <span>Local Host Sandbox</span>
+              <span className="badge badge-passed">
+                <span>{config?.execution_backend?.toUpperCase() || 'DOCKER'}</span>
+              </span>
+              {config?.token_factory_sandbox_configured && (
+                <span className="badge badge-passed" style={{ fontSize: '0.7rem' }}>
+                  ConTree Ready
                 </span>
               )}
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              {config?.docker_available
-                ? 'Non-networked container isolation available'
-                : 'Docker not running; bundled demo runs via safe local subprocess'}
+              {config?.execution_backend === 'token_factory_sandbox'
+                ? 'Nebius Token Factory / ConTree cloud container sandbox'
+                : config?.docker_available
+                  ? 'Local non-networked Docker container isolation'
+                  : 'Docker daemon offline; demo runs via safe local runner'}
             </p>
           </div>
         </div>
@@ -186,10 +186,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ config, onRefresh })
 PROOFPATCH_MODE=live
 
 # 2. Add Nebius Token Factory Credentials & NVIDIA Model
+# (Select active eligible model identifier from tokenfactory.nebius.com/models)
 NEBIUS_API_KEY=your_actual_nebius_api_key_here
 NEBIUS_MODEL=nvidia/nemotron-4-340b-instruct
 
-# 3. (Optional) Activate Tavily Technical Research
+# 3. Choose Execution Sandbox Backend
+# Options: "docker" (local daemon) or "token_factory_sandbox" (Nebius ConTree)
+EXECUTION_BACKEND=docker
+# If using Token Factory sandbox:
+# CONTREE_TOKEN=your_contree_or_nebius_token
+
+# 4. (Optional) Activate Tavily Technical Research
 TAVILY_API_KEY=your_tavily_api_key_here
 TAVILY_ENABLED=true`}
           </pre>

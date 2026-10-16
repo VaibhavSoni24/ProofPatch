@@ -8,7 +8,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](backend/)
 [![React: 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
-[![Tests: 37 Passed](https://img.shields.io/badge/Tests-37%20Passed-10B981)](docs/TESTING.md)
+[![Tests: 49 Passed](https://img.shields.io/badge/Tests-49%20Passed-10B981)](docs/TESTING.md)
 
 ---
 
@@ -29,12 +29,12 @@ Developers waste significant engineering hours manually reproducing defects and 
 ProofPatch transforms bug fixing from an ungrounded chat interaction into a **traceable, auditable engineering pipeline**:
 
 1. **Inspects** the repository without context bloat.
-2. **Reproduces** the reported defect in an isolated workspace using real test commands (`Exit Code != 0`).
-3. **Diagnoses** the exact technical root cause using structured model schemas.
+2. **Reproduces** the reported defect in an isolated sandbox using real test commands (`Exit Code != 0`). Halts as `INCONCLUSIVE` if tests pass or fail due to unrelated environment issues.
+3. **Diagnoses** the exact technical root cause using structured model schemas via **Nebius Token Factory**.
 4. **Researches** relevant framework documentation and API changes via **Tavily Search API**.
 5. **Synthesizes** a minimal, surgical unified diff.
-6. **Validates** patch security (preventing path traversal and bounding byte caps).
-7. **Executes** regression tests in disposable sandboxes (`Exit Code == 0`).
+6. **Validates** patch security (strictly preventing path traversal, protected files, and bounding byte caps).
+7. **Executes** regression tests in isolated sandboxes (`Exit Code == 0`).
 8. **Audits** 6 independent verification criteria before declaring success.
 9. **Persists** an immutable, downloadable evidence report with raw command logs.
 
@@ -44,9 +44,10 @@ ProofPatch transforms bug fixing from an ungrounded chat interaction into a **tr
 
 - **Observable Evidence Workflow**: Every claim is backed by real executed commands, timestamps, and exit codes. Never presents a generated explanation as a success without executable proof.
 - **Zero-Credit Offline Demonstration**: Ships with a deterministic local demo featuring an intentionally buggy SaaS billing service (`examples/buggy-python-service/`). Runs out of the box on an ordinary laptop with zero API keys or cloud GPUs.
-- **Nebius Token Factory Adapter**: OpenAI-compatible adapter targeting eligible open-source **NVIDIA Nemotron** reasoning models.
-- **Tavily Research Integration**: Targeted autonomous search retrieving real documentation, change logs, and technical discussions.
-- **Strict Sandbox Boundaries**: Disposable workspace checkouts, environment sanitization (secrets stripped from subprocesses), path traversal rejection (`../`), and Docker isolation support.
+- **Nebius Token Factory Adapter**: Fully asynchronous OpenAI-compatible adapter targeting eligible open-source **NVIDIA Nemotron** reasoning models.
+- **Nebius ConTree Sandbox Integration**: Supports the official Nebius ConTree container runtime (`token_factory_sandbox`) for remote cloud container execution, alongside local Docker isolation.
+- **Tavily Research Integration**: Targeted asynchronous search retrieving real documentation, change logs, and technical discussions.
+- **Strict Sandbox Boundaries**: Disposable workspace checkouts, environment sanitization (secrets stripped from subprocesses), path traversal rejection (`../`), and container isolation.
 
 ---
 
@@ -55,24 +56,26 @@ ProofPatch transforms bug fixing from an ungrounded chat interaction into a **tr
 ```mermaid
 graph TD
     User["Developer / Web Browser"] -->|HTTP / JSON| Frontend["React 19 + TypeScript + Vite Dashboard"]
-    Frontend -->|REST API| API["FastAPI Backend Orchestrator"]
+    Frontend -->|Async REST API| API["FastAPI Backend Orchestrator"]
     subgraph Core Engine
         API --> DB[(SQLite Local Persistence)]
-        API --> Orchestrator["Autonomous Repair Orchestrator"]
+        API --> Orchestrator["Async Autonomous Repair Orchestrator"]
         Orchestrator --> RepoAcq["Repository Acquisition & Git"]
-        Orchestrator --> Sandbox["Sandbox Subprocess / Docker Runner"]
+        Orchestrator --> SandboxFactory["Sandbox Backend Factory"]
         Orchestrator --> PatchParser["Unified Diff Security Validator"]
         Orchestrator --> Verifier["Independent Deterministic Verifier"]
         Orchestrator --> EvidenceService["Evidence Report Generator"]
     end
 
-    subgraph External Provider Integrations
-        Orchestrator -.->|OpenAI-Compatible| Nebius["Nebius Token Factory (NVIDIA Models)"]
-        Orchestrator -.->|HTTP JSON API| Tavily["Tavily Search API"]
+    subgraph Sandbox Execution Backends
+        SandboxFactory -->|Demo Mode| LocalSandbox["LocalExecutionBackend (Trusted Fixture Only)"]
+        SandboxFactory -->|Docker Backend| DockerSandbox["DockerExecutionBackend (--network none, memory-capped)"]
+        SandboxFactory -->|Token Factory Backend| ConTreeSandbox["TokenFactorySandboxBackend (Nebius ConTree Cloud)"]
     end
 
-    subgraph Sandboxed Workspaces
-        Sandbox -->|Isolated Pytest Runner| Workspace["Disposable Workspace Copy (/data/workspaces)"]
+    subgraph External Provider Integrations
+        Orchestrator -.->|Async OpenAI-Compatible| Nebius["Nebius Token Factory (NVIDIA Models)"]
+        Orchestrator -.->|Async HTTP API| Tavily["Tavily Search API"]
     end
 ```
 
@@ -81,10 +84,10 @@ graph TD
 ## Technology Stack
 
 - **Frontend**: React 19, TypeScript, Vite, custom responsive dark CSS design system, Lucide React icons, Vitest, React Testing Library.
-- **Backend**: Python 3.10+, FastAPI, Pydantic & Pydantic Settings, SQLAlchemy, SQLite, HTTPX, Pytest, Ruff.
-- **Inference Integration**: OpenAI-compatible adapter for Nebius Token Factory (`api.tokenfactory.nebius.com`).
-- **Research Integration**: Tavily Search API client.
-- **Isolation & Sandboxing**: Process boundary isolation with secret scrubbing, plus Docker container isolation support (`--network none`, memory & CPU caps).
+- **Backend**: Python 3.10+, FastAPI (fully asynchronous), Pydantic & Pydantic Settings, SQLAlchemy, SQLite, HTTPX, Pytest, Ruff.
+- **Inference Integration**: Asynchronous OpenAI-compatible adapter for Nebius Token Factory (`api.tokenfactory.nebius.com`).
+- **Research Integration**: Asynchronous Tavily Search API client.
+- **Isolation & Sandboxing**: `LocalExecutionBackend` (demo only), `DockerExecutionBackend` (non-networked local container), and `TokenFactorySandboxBackend` (Nebius ConTree cloud container runtime).
 
 ---
 
@@ -113,10 +116,10 @@ ProofPatch/
 │   │   ├── schemas/               # Pydantic request and response schemas
 │   │   ├── providers/             # Nebius Token Factory and Tavily adapters
 │   │   ├── repositories/          # GitHub URL validation and inspection
-│   │   ├── agents/                # Prompts, patch parser, and verifier
-│   │   ├── sandbox/               # Subprocess execution and Docker runner
+│   │   ├── agents/                # Async orchestrator, prompts, patch parser, and verifier
+│   │   ├── sandbox/               # Local, Docker, and Token Factory ConTree sandbox backends
 │   │   └── services/              # Demo runner, evidence generator, run manager
-│   └── tests/                     # 34 backend unit & mocked provider tests
+│   └── tests/                     # 46 backend unit, sandbox & mocked provider tests
 │
 ├── frontend/                      # React TypeScript Frontend
 │   ├── package.json               # Node dependencies and scripts
@@ -167,7 +170,7 @@ cd ProofPatch
 #### On Windows PowerShell:
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 pip install -e backend
 uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
@@ -207,10 +210,10 @@ Click **Run Demo Repair** in the top navigation bar. ProofPatch will:
 
 ## Running the Automated Test Suites
 
-ProofPatch includes 37 automated tests that execute with **zero external API requests**:
+ProofPatch includes 49 automated tests that execute with **zero external API requests**:
 
 ```bash
-# Backend pytest suite (34 tests)
+# Backend pytest suite (46 tests)
 pytest backend/tests -v
 
 # Backend code style and formatting
@@ -250,7 +253,13 @@ ProofPatch defaults to `demo` mode. To activate genuine live model inference for
    NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
 
    # Configured eligible NVIDIA open-source model identifier
+   # (Select active model string from tokenfactory.nebius.com/models)
    NEBIUS_MODEL=nvidia/nemotron-4-340b-instruct
+
+   # Sandbox Backend: "docker" or "token_factory_sandbox"
+   EXECUTION_BACKEND=docker
+   # If using Token Factory sandbox:
+   # CONTREE_TOKEN=your_contree_or_nebius_token
 
    # (Optional) Tavily Search for live documentation research
    TAVILY_API_KEY=your_tavily_api_key_here
@@ -267,7 +276,7 @@ ProofPatch defaults to `demo` mode. To activate genuine live model inference for
 
 - **Strict Credential Isolation**: Provider keys reside solely on the backend; the `/api/config-status` endpoint exposes only sanitized boolean flags. Secrets are scrubbed from logs, terminal outputs, and reports.
 - **Unified Diff Validation**: Every patch is checked before application. Path traversals (`../`), absolute paths, and modifications to `.git`, `.env`, or configuration files are strictly rejected.
-- **Execution Confinement**: External code runs inside disposable subdirectories. Docker isolation (`--network none`, memory & CPU limits) is supported for untrusted repositories.
+- **Execution Confinement**: External code runs inside disposable subdirectories. Docker isolation (`--network none`, memory & CPU limits) and Token Factory cloud sandboxes are supported.
 - **No Uncontrolled Retries**: Strict budget limits prevent runaway token billing.
 
 ---

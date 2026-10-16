@@ -1,6 +1,6 @@
 # ProofPatch Testing & Quality Assurance Guide
 
-ProofPatch enforces rigorous automated test coverage across both backend orchestration and frontend interfaces. Testing requires **zero external API credits**; all model inference and search providers are comprehensively tested using mocked HTTP responses.
+ProofPatch enforces rigorous automated test coverage across both backend orchestration and frontend interfaces. Testing requires **zero external API credits**; all model inference and search providers are comprehensively tested using mocked HTTP responses and local deterministic fixtures.
 
 ---
 
@@ -15,10 +15,11 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | **Tavily Provider** | `pytest` | 3 tests | Mocks search queries, disabled status, and network connection fallbacks. |
 | **Patch Parser & Security** | `pytest` | 6 tests | Path traversal rejection (`../`), diff size caps, clean hunk application. |
 | **Run Management API** | `pytest` | 5 tests | Endpoints for `/api/health`, `/api/config-status`, `/api/runs`, `/api/runs/demo`, 404 handling. |
-| **Deterministic Verifier** | `pytest` | 3 tests | Tests audit checks (reproduction proof, exit code checks, secret redaction). |
-| **Orchestrator Integration** | `pytest` | 1 test | Full live workflow execution using mocked Nebius and Tavily providers. |
+| **Execution Sandboxes** | `pytest` | 7 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree sandbox lifecycle. |
+| **Deterministic Verifier** | `pytest` | 6 tests | Audits missing exit codes, inconclusive baseline tests, contradictory post-patch outputs, and secrets. |
+| **Async Orchestrator Integration** | `pytest` | 3 tests | Full async workflow with mocked Nebius, Tavily, reproduction gating, and provider error handling. |
 | **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
-| **Total Automated Tests** | | **37 tests** | **100% Pass Rate** |
+| **Total Automated Tests** | | **49 tests** | **100% Pass Rate** |
 
 ---
 
@@ -41,12 +42,18 @@ pytest backend/tests -v
 
 ### Run Specific Test Modules:
 ```bash
+# Sandbox and execution backend tests
+pytest backend/tests/test_sandbox.py -v
+
+# Verification engine audit tests
+pytest backend/tests/test_verification.py -v
+
+# Async orchestrator integration tests
+pytest backend/tests/test_orchestrator.py -v
+
 # Provider mocked tests
 pytest backend/tests/test_nebius_provider.py -v
 pytest backend/tests/test_tavily_provider.py -v
-
-# Patch parser and security checks
-pytest backend/tests/test_patch_parser.py -v
 ```
 
 ---
@@ -83,6 +90,7 @@ ruff format --check backend
 
 ### Frontend (TypeScript):
 ```bash
+cd frontend
 npm run typecheck
 ```
 

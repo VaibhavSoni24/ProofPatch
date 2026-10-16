@@ -12,6 +12,8 @@ export interface ConfigStatus {
   tavily_enabled: boolean;
   tavily_configured: boolean;
   docker_available: boolean;
+  execution_backend: string;
+  token_factory_sandbox_configured: boolean;
   max_model_calls: number;
   max_patch_iterations: number;
   timeout_seconds: number;

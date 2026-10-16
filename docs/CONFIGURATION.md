@@ -16,10 +16,12 @@ This document provides a comprehensive reference for all configuration options a
 | `PROOFPATCH_MODE` | `string` | `demo` | **Yes** | Execution mode: `demo` (zero-credential offline sample workflow) or `live` (invokes Nebius Token Factory & Tavily). |
 | `NEBIUS_API_KEY` | `string` | `""` | Only in `live` mode | API Key for Nebius Token Factory OpenAI-compatible inference. Must NEVER be committed to Git. |
 | `NEBIUS_BASE_URL` | `string` | `https://api.tokenfactory.nebius.com/v1/` | No | OpenAI-compatible endpoint URL for Nebius Token Factory. |
-| `NEBIUS_MODEL` | `string` | `""` | Only in `live` mode | Configured NVIDIA open-source model identifier (e.g. `nvidia/nemotron-4-340b-instruct` or an eligible model from the Nebius catalog). |
+| `NEBIUS_MODEL` | `string` | `""` | Only in `live` mode | Configured eligible NVIDIA open-source model identifier from the Nebius Token Factory catalog (e.g. `nvidia/nemotron-4-340b-instruct` or current active catalog ID from `tokenfactory.nebius.com/models`). |
 | `TAVILY_API_KEY` | `string` | `""` | Only if `TAVILY_ENABLED=true` | API key for Tavily Search API. Used to retrieve documentation, API updates, and security advisories. |
 | `TAVILY_ENABLED` | `boolean` | `false` | No | Set to `true` to activate autonomous web research during the diagnosis stage. |
-| `EXECUTION_BACKEND` | `string` | `docker` | No | Isolation backend for running test commands on external repositories (`docker` or `local`). |
+| `EXECUTION_BACKEND` | `string` | `docker` | No | Sandbox backend for isolating untrusted repository test execution: `docker` (local daemon) or `token_factory_sandbox` (Nebius ConTree cloud container). |
+| `CONTREE_TOKEN` | `string` | `""` | Only if using `token_factory_sandbox` | Dedicated token or API key for Nebius ConTree container sandbox API. Falls back to `NEBIUS_API_KEY` if omitted. |
+| `CONTREE_BASE_URL` | `string` | `https://api.tokenfactory.nebius.com/sandboxes` | No | Endpoint URL for Nebius Token Factory / ConTree sandbox API. |
 | `ALLOW_EXTERNAL_REPOSITORIES` | `boolean` | `false` | No | Safety safeguard. When `false`, only bundled fixtures can be executed; prevents arbitrary untrusted git clone execution without explicit user consent. |
 | `MAX_MODEL_CALLS_PER_RUN` | `integer` | `4` | No | Strict budget cap on the number of LLM inference calls allowed per repair run to prevent credit exhaustion. |
 | `MAX_PATCH_ITERATIONS` | `integer` | `2` | No | Maximum number of repair loops if post-patch tests fail. |
@@ -34,7 +36,7 @@ This document provides a comprehensive reference for all configuration options a
 
 ---
 
-## Execution Modes
+## Execution Modes & Sandboxing
 
 ### 1. `demo` Mode (Default)
 - **Zero Credentials Needed**: Operates without any API keys or network access to model providers.
@@ -45,4 +47,17 @@ This document provides a comprehensive reference for all configuration options a
 ### 2. `live` Mode
 - **Requires**: `PROOFPATCH_MODE=live`, a valid `NEBIUS_API_KEY`, an eligible `NEBIUS_MODEL`, and explicit user confirmation per run.
 - **Tavily (Optional)**: If `TAVILY_ENABLED=true` and `TAVILY_API_KEY` is supplied, autonomous web research is conducted during the diagnosis stage.
-- **Docker Isolation**: External repositories are isolated inside disposable, non-networked Docker containers.
+- **Sandboxed Execution**: External repositories are isolated inside either:
+  1. **Docker Backend (`EXECUTION_BACKEND=docker`)**: Non-networked (`--network none`), memory-capped (512MB), CPU-limited (1.0 core), disposable workspace container.
+  2. **Token Factory Sandbox (`EXECUTION_BACKEND=token_factory_sandbox`)**: Official Nebius ConTree cloud container runtime for SWE agents, provisioning isolated sessions, executing commands, and disposing resources.
+
+---
+
+## Evidence Verification Statuses
+
+ProofPatch never fabricates verification results or assumes success without evidence:
+
+- **`PASSED`**: Claim is backed by verified execution output and exit code 0 (with zero failure indicators).
+- **`FAILED`**: Explicit test failure, patch rejection, or security check violation.
+- **`NOT_RUN`**: The stage or check was not executed (e.g., post-patch tests never ran because pre-patch reproduction failed).
+- **`INCONCLUSIVE`**: Baseline tests exited non-zero, but output revealed an environmental error (e.g. missing package or collection error) rather than reproducible proof of the reported bug.
