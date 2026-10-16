@@ -31,9 +31,9 @@ jobs:
 
       - name: Run Pytest Suite
         env:
-          PROOFPATCH_MODE: demo
-          DATABASE_URL: sqlite:///:memory:
-          LOG_LEVEL: INFO
+          PROOFPATCH_MODE: "demo"
+          DATABASE_URL: "sqlite:///:memory:"
+          LOG_LEVEL: "INFO"
         run: |
           pytest backend/tests -v --durations=10
 
