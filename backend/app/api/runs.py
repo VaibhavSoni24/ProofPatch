@@ -51,7 +51,7 @@ def trigger_demo_run(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=RunDetailResponse, status_code=status.HTTP_201_CREATED)
-def create_run(request: RunCreateRequest, db: Session = Depends(get_db)):
+async def create_run(request: RunCreateRequest, db: Session = Depends(get_db)):
     """Initiate a repair run (validating safety, mode, and explicit user consent)."""
     # Demo request or bundled repository
     if (
@@ -86,7 +86,7 @@ def create_run(request: RunCreateRequest, db: Session = Depends(get_db)):
         # For live runs with external repos, the orchestrator handles live execution
         from app.agents.orchestrator import execute_live_run
 
-        run = execute_live_run(db, request)
+        run = await execute_live_run(db, request)
         return get_run_details(db, run.id)
 
     raise HTTPException(

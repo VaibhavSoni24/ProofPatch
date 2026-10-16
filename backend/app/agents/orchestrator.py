@@ -1,5 +1,6 @@
 """Autonomous repair loop orchestrator executing live multi-stage repair workflow."""
 
+import asyncio
 import json
 import uuid
 from typing import Optional
@@ -23,7 +24,8 @@ from app.providers.nebius import NebiusTokenFactoryProvider
 from app.providers.tavily import TavilySearchProvider
 from app.repositories.git import clone_public_repository, validate_repository_url
 from app.repositories.inspection import inspect_repository
-from app.sandbox.commands import execute_test_command
+from app.sandbox.base import BaseExecutionBackend
+from app.sandbox.factory import get_execution_backend
 from app.schemas.evidence import TestRecord
 from app.schemas.runs import RunCreateRequest
 from app.services.demo import log_stage_event
@@ -42,20 +44,22 @@ def strip_markdown_fences(text: str) -> str:
     return cleaned
 
 
-def execute_live_run(
+async def execute_live_run(
     db: Session,
     request: RunCreateRequest,
     existing_run_id: Optional[str] = None,
     nebius_provider: Optional[NebiusTokenFactoryProvider] = None,
     tavily_provider: Optional[TavilySearchProvider] = None,
+    execution_backend: Optional[BaseExecutionBackend] = None,
 ) -> RunModel:
-    """Execute the full autonomous repair workflow for a repository."""
+    """Execute the full autonomous repair workflow for an external repository."""
     run_id = existing_run_id or f"run_{uuid.uuid4().hex[:8]}"
     workspace_root = settings.get_workspace_dir()
     workspace_path = workspace_root / run_id
 
     nebius = nebius_provider or NebiusTokenFactoryProvider()
     tavily = tavily_provider or TavilySearchProvider()
+    sandbox = execution_backend or get_execution_backend(mode="live")
 
     # 1. Initialize Run in DB
     run = db.query(RunModel).filter(RunModel.id == run_id).first()
@@ -84,12 +88,14 @@ def execute_live_run(
             f"Validating and cloning public repository: {request.repository_url}...",
         )
         validate_repository_url(request.repository_url)
-        commit_hash = clone_public_repository(request.repository_url, workspace_path)
+        commit_hash = await asyncio.to_thread(
+            clone_public_repository, request.repository_url, workspace_path
+        )
         run.commit_hash = commit_hash
         db.commit()
 
         # Stage 2: Inspection
-        inspection = inspect_repository(workspace_path)
+        inspection = await asyncio.to_thread(inspect_repository, workspace_path)
         log_stage_event(
             db,
             run_id,
@@ -99,23 +105,25 @@ def execute_live_run(
             {"total_files": inspection.total_files},
         )
 
-        # Stage 3: Bug Reproduction
+        # Stage 3: Bug Reproduction (Executed inside isolated sandbox)
         log_stage_event(
             db,
             run_id,
             "reproduce",
             "started",
-            "Executing baseline test suite to attempt defect reproduction...",
+            f"Executing baseline test suite inside isolated sandbox ({sandbox.backend_name})...",
         )
         repro_cmd = "pytest tests -v"
-        repro_exit_code, repro_output, _, _ = execute_test_command(workspace_path)
+        repro_res = await sandbox.execute_tests(
+            workspace_dir=workspace_path, timeout_seconds=settings.sandbox_timeout_seconds
+        )
 
         run.reproduction_command = repro_cmd
-        run.reproduction_exit_code = repro_exit_code
-        run.reproduction_output = repro_output
-        run.pre_patch_test_output = repro_output
-        run.pre_patch_exit_code = repro_exit_code
-        run.reproduced = repro_exit_code != 0
+        run.reproduction_exit_code = repro_res.exit_code
+        run.reproduction_output = repro_res.output
+        run.pre_patch_test_output = repro_res.output
+        run.pre_patch_exit_code = repro_res.exit_code
+        run.reproduced = repro_res.exit_code != 0
         db.commit()
 
         if run.reproduced:
@@ -124,8 +132,8 @@ def execute_live_run(
                 run_id,
                 "reproduce",
                 "completed",
-                f"Defect reproduced! Baseline tests failed with exit code {repro_exit_code}.",
-                {"exit_code": repro_exit_code},
+                f"Defect reproduced! Baseline tests failed with exit code {repro_res.exit_code}.",
+                {"exit_code": repro_res.exit_code},
             )
         else:
             log_stage_event(
@@ -149,7 +157,7 @@ def execute_live_run(
                 "started",
                 f"Executing Tavily research search for: '{request.bug_title}'...",
             )
-            search_res = tavily.search(request.bug_title, max_results=3)
+            search_res = await tavily.search(request.bug_title, max_results=3)
             run.tavily_searches_count += 1
             db.commit()
 
@@ -206,7 +214,7 @@ def execute_live_run(
             research_context=research_context,
         )
 
-        diag_res = nebius.generate_completion(
+        diag_res = await nebius.generate_completion(
             messages=[
                 {"role": "system", "content": DIAGNOSIS_SYSTEM_PROMPT},
                 {"role": "user", "content": diag_prompt},
@@ -255,7 +263,7 @@ def execute_live_run(
             context_files=inspection.context_files_content,
         )
 
-        patch_res = nebius.generate_completion(
+        patch_res = await nebius.generate_completion(
             messages=[
                 {"role": "system", "content": PATCH_SYSTEM_PROMPT},
                 {"role": "user", "content": patch_prompt},
@@ -267,7 +275,7 @@ def execute_live_run(
 
         patch_diff = strip_markdown_fences(patch_res.content)
         validate_patch_security(patch_diff)
-        modified = apply_patch_to_workspace(workspace_path, patch_diff)
+        modified = await asyncio.to_thread(apply_patch_to_workspace, workspace_path, patch_diff)
 
         run.patch_diff = patch_diff
         run.modified_files = json.dumps(modified)
@@ -293,12 +301,14 @@ def execute_live_run(
                 run_id,
                 "test",
                 "started",
-                f"Executing regression tests (Iteration {current_iteration}/{max_iterations})...",
+                f"Executing regression tests inside sandbox ({sandbox.backend_name}, Iteration {current_iteration}/{max_iterations})...",
             )
-            post_exit_code, post_output, _, _ = execute_test_command(workspace_path)
-            run.post_patch_test_output = post_output
-            run.post_patch_exit_code = post_exit_code
-            run.test_passed = post_exit_code == 0
+            post_res = await sandbox.execute_tests(
+                workspace_dir=workspace_path, timeout_seconds=settings.sandbox_timeout_seconds
+            )
+            run.post_patch_test_output = post_res.output
+            run.post_patch_exit_code = post_res.exit_code
+            run.test_passed = post_res.exit_code == 0
             db.commit()
 
             if run.test_passed:
@@ -316,7 +326,7 @@ def execute_live_run(
                     run_id,
                     "test",
                     "failed",
-                    f"Iteration {current_iteration} failed with exit code {post_exit_code}.",
+                    f"Iteration {current_iteration} failed with exit code {post_res.exit_code}.",
                 )
                 if current_iteration >= max_iterations:
                     break
@@ -349,12 +359,12 @@ def execute_live_run(
 
 ### Pytest Failure Trace:
 ```text
-{post_output[:4000]}
+{post_res.output[:4000]}
 ```
 
 Generate a revised, corrected unified diff to fix this error."""
 
-                repair_res = nebius.generate_completion(
+                repair_res = await nebius.generate_completion(
                     messages=[
                         {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
                         {"role": "user", "content": repair_prompt},
@@ -366,7 +376,9 @@ Generate a revised, corrected unified diff to fix this error."""
 
                 revised_diff = strip_markdown_fences(repair_res.content)
                 validate_patch_security(revised_diff)
-                modified = apply_patch_to_workspace(workspace_path, revised_diff)
+                modified = await asyncio.to_thread(
+                    apply_patch_to_workspace, workspace_path, revised_diff
+                )
                 run.patch_diff = revised_diff
                 run.modified_files = json.dumps(modified)
                 db.commit()
@@ -382,12 +394,9 @@ Generate a revised, corrected unified diff to fix this error."""
         is_verified, checks = perform_independent_verification(
             patch_diff=run.patch_diff or "",
             modified_files=json.loads(run.modified_files) if run.modified_files else [],
-            pre_patch_exit_code=run.pre_patch_exit_code
-            if run.pre_patch_exit_code is not None
-            else 1,
-            post_patch_exit_code=run.post_patch_exit_code
-            if run.post_patch_exit_code is not None
-            else 1,
+            pre_patch_exit_code=run.pre_patch_exit_code,
+            post_patch_exit_code=run.post_patch_exit_code,
+            pre_patch_output=run.pre_patch_test_output or "",
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
         )
@@ -413,15 +422,23 @@ Generate a revised, corrected unified diff to fix this error."""
             TestRecord(
                 stage="pre_patch",
                 command="pytest tests -v",
-                exit_code=run.pre_patch_exit_code or 1,
-                passed=False,
+                exit_code=run.pre_patch_exit_code,
+                passed=(run.pre_patch_exit_code == 0)
+                if run.pre_patch_exit_code is not None
+                else None,
+                test_status="FAILED"
+                if run.pre_patch_exit_code not in (0, None)
+                else ("PASSED" if run.pre_patch_exit_code == 0 else "NOT_RUN"),
                 output_summary="Baseline test failure reproducing reported defect.",
             ),
             TestRecord(
                 stage="post_patch",
                 command="pytest tests -v",
-                exit_code=run.post_patch_exit_code if run.post_patch_exit_code is not None else 0,
-                passed=run.test_passed,
+                exit_code=run.post_patch_exit_code,
+                passed=run.test_passed if run.post_patch_exit_code is not None else None,
+                test_status="PASSED"
+                if run.test_passed
+                else ("FAILED" if run.post_patch_exit_code is not None else "NOT_RUN"),
                 output_summary="Post-patch regression test outcome.",
             ),
         ]
@@ -455,3 +472,10 @@ Generate a revised, corrected unified diff to fix this error."""
             f"Live repair terminated prematurely: {str(exc)}",
         )
         return run
+
+    finally:
+        # Guarantee sandbox cleanup
+        try:
+            await sandbox.cleanup()
+        except Exception as cleanup_exc:
+            logger.warning("Error during sandbox cleanup: %s", cleanup_exc)
