@@ -39,7 +39,7 @@ def inspect_repository(
     max_context_chars: int = 40000,
 ) -> RepositoryInspection:
     """Inspect repository files safely within bounds."""
-    from app.repositories.security import safe_walk_repository
+    from app.repositories.security import safe_read_file_bytes, safe_walk_repository
 
     source_files: List[str] = []
     test_files: List[str] = []
@@ -63,13 +63,13 @@ def inspect_repository(
         elif entry.path.suffix == ".py":
             source_files.append(rel_path)
 
-        # Collect bounded context snippet for key files
+        # Collect bounded context snippet for key files safely
         if len(context_contents) < 15 and total_chars < max_context_chars:
             try:
-                content = entry.path.read_text(encoding="utf-8", errors="replace")
-                if len(content) < 10000:
-                    context_contents[rel_path] = content
-                    total_chars += len(content)
+                raw_bytes = safe_read_file_bytes(entry.path, trusted_root=repo_dir, max_bytes=10000)
+                content = raw_bytes.decode("utf-8", errors="replace")
+                context_contents[rel_path] = content
+                total_chars += len(content)
             except Exception:
                 pass
 

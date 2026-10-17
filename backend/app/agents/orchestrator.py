@@ -28,7 +28,7 @@ from app.providers.nebius import NebiusTokenFactoryProvider
 from app.providers.tavily import TavilySearchProvider
 from app.repositories.git import clone_public_repository, validate_repository_url
 from app.repositories.inspection import inspect_repository
-from app.repositories.security import compute_repository_manifest
+from app.repositories.security import compute_repository_manifest, safe_isolate_repository
 from app.sandbox.base import BaseExecutionBackend
 from app.sandbox.factory import get_execution_backend
 from app.schemas.evidence import TestRecord
@@ -105,11 +105,18 @@ async def execute_live_run(
             pristine_path.mkdir(parents=True, exist_ok=True)
 
         # Establish deterministic pristine repository baseline manifest before repair
-        baseline_manifest = await asyncio.to_thread(compute_repository_manifest, pristine_path)
+        baseline_manifest = await asyncio.to_thread(
+            compute_repository_manifest, pristine_path, settings.get_workspace_dir()
+        )
 
-        if workspace_path.exists():
-            shutil.rmtree(workspace_path)
-        shutil.copytree(pristine_path, workspace_path, symlinks=False)
+        # Safely isolate repository into workspace without following symlinks
+        await asyncio.to_thread(
+            safe_isolate_repository,
+            source_dir=pristine_path,
+            target_dir=workspace_path,
+            trusted_workspace_root=settings.get_workspace_dir(),
+            trusted_source_root=settings.get_workspace_dir(),
+        )
 
         # Stage 2: Inspection
         inspection = await asyncio.to_thread(inspect_repository, workspace_path)
@@ -565,9 +572,12 @@ Generate a revised, corrected unified diff to fix this error."""
         except Exception as cleanup_exc:
             logger.warning("Error during sandbox cleanup: %s", cleanup_exc)
 
-        # Cleanup pristine baseline directory
+        # Safely cleanup pristine baseline directory confined to workspace root
         if pristine_path.exists():
             try:
-                shutil.rmtree(pristine_path, ignore_errors=True)
+                resolved_p = pristine_path.resolve()
+                ws_root = settings.get_workspace_dir().resolve()
+                if resolved_p.is_relative_to(ws_root) and resolved_p != ws_root:
+                    shutil.rmtree(pristine_path, ignore_errors=True)
             except Exception as rmtree_err:
                 logger.debug("Error cleaning up pristine path %s: %s", pristine_path, rmtree_err)

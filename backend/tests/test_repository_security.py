@@ -325,15 +325,15 @@ def test_safe_read_file_bytes_rejects_symlink(tmp_path):
 
     if CAN_SYMLINK:
         link.symlink_to(real)
-        with pytest.raises(SecurityViolationError, match="Symbolic links are prohibited"):
+        with pytest.raises(
+            SecurityViolationError, match=r"Symbolic links are (?:strictly )?prohibited"
+        ):
             safe_read_file_bytes(link, trusted_root=tmp_path)
     else:
-        with patch("os.lstat") as mock_lstat:
-            import stat
-
-            mock_res = type("StatRes", (), {"st_mode": stat.S_IFLNK, "st_size": 10})()
-            mock_lstat.return_value = mock_res
-            with pytest.raises(SecurityViolationError, match="Symbolic links are prohibited"):
+        with patch.object(Path, "is_symlink", return_value=True):
+            with pytest.raises(
+                SecurityViolationError, match=r"Symbolic links are (?:strictly )?prohibited"
+            ):
                 safe_read_file_bytes(real, trusted_root=tmp_path)
 
 
@@ -364,3 +364,165 @@ def test_compute_repository_manifest_deterministic(tmp_path):
     assert len(manifest["a.txt"]) == 64
     assert len(manifest["b.txt"]) == 64
     assert len(manifest["sub/c.txt"]) == 64
+
+
+def test_safe_isolate_repository_regular_files(tmp_path):
+    """Verify safe_isolate_repository copies regular files safely."""
+    from app.repositories.security import safe_isolate_repository
+
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    (source / "tests").mkdir()
+    (source / "tests" / "test_app.py").write_text("assert True\n", encoding="utf-8")
+
+    safe_isolate_repository(source, target, trusted_workspace_root=tmp_path)
+
+    assert target.exists()
+    assert (target / "app.py").read_text(encoding="utf-8") == "print('hello')\n"
+    assert (target / "tests" / "test_app.py").read_text(encoding="utf-8") == "assert True\n"
+
+
+def test_safe_isolate_repository_rejects_symlink_to_external_file(tmp_path):
+    """Verify safe_isolate_repository rejects symlink to host file and never copies target."""
+    from app.repositories.security import safe_isolate_repository
+
+    host_secret = tmp_path / "host_secret.txt"
+    host_secret.write_text("TOP_SECRET_HOST_CONTENT", encoding="utf-8")
+
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    link = source / "stolen.txt"
+    if CAN_SYMLINK:
+        link.symlink_to(host_secret)
+        with pytest.raises(SecurityViolationError, match="Symbolic link"):
+            safe_isolate_repository(source, target, trusted_workspace_root=tmp_path)
+    else:
+        with patch.object(Path, "is_symlink", side_effect=lambda: True):
+            with pytest.raises(SecurityViolationError, match="Symbolic link"):
+                safe_isolate_repository(source, target, trusted_workspace_root=tmp_path)
+
+    # Ensure external target was NEVER copied into workspace
+    assert not (target / "stolen.txt").exists()
+
+
+def test_safe_isolate_repository_rejects_symlink_dir(tmp_path):
+    """Verify safe_isolate_repository rejects symlinked directory."""
+    from app.repositories.security import safe_isolate_repository
+
+    external_dir = tmp_path / "external_dir"
+    external_dir.mkdir()
+    (external_dir / "secret.txt").write_text("secret", encoding="utf-8")
+
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+
+    sym_dir = source / "sym_dir"
+    if CAN_SYMLINK:
+        sym_dir.symlink_to(external_dir, target_is_directory=True)
+        with pytest.raises(SecurityViolationError, match="Symbolic link directory"):
+            safe_isolate_repository(source, target, trusted_workspace_root=tmp_path)
+    else:
+        orig_is_symlink = Path.is_symlink
+        with patch.object(
+            Path,
+            "is_symlink",
+            autospec=True,
+            side_effect=lambda self: True if self.name == "sym_dir" else orig_is_symlink(self),
+        ):
+            (source / "sym_dir").mkdir()
+            with pytest.raises(SecurityViolationError, match="Symbolic link directory"):
+                safe_isolate_repository(source, target, trusted_workspace_root=tmp_path)
+
+
+def test_safe_isolate_repository_rejects_unreadable_file(tmp_path):
+    """Verify safe_isolate_repository fails closed when a file cannot be statted or read."""
+    from app.repositories.security import safe_isolate_repository
+
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    unreadable = source / "unreadable.py"
+    unreadable.write_text("code", encoding="utf-8")
+
+    with patch(
+        "app.repositories.security.safe_hash_file",
+        side_effect=SecurityViolationError("File unreadable"),
+    ):
+        with pytest.raises(SecurityViolationError):
+            safe_isolate_repository(source, target, trusted_workspace_root=tmp_path)
+
+
+def test_safe_isolate_repository_rejects_path_outside_root(tmp_path):
+    """Verify safe_isolate_repository rejects source or target outside trusted root."""
+    from app.repositories.security import safe_isolate_repository
+
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = trusted_root / "target"
+
+    with pytest.raises(SecurityViolationError, match="outside trusted workspace root"):
+        safe_isolate_repository(outside, target, trusted_workspace_root=trusted_root)
+
+
+def test_compute_repository_manifest_rejects_symlink(tmp_path):
+    """Verify compute_repository_manifest fails closed on any symbolic link in the repo."""
+    from app.repositories.security import compute_repository_manifest
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "file.txt").write_text("content", encoding="utf-8")
+
+    if CAN_SYMLINK:
+        (repo / "link.txt").symlink_to(repo / "file.txt")
+        with pytest.raises(SecurityViolationError, match="Symbolic link"):
+            compute_repository_manifest(repo)
+    else:
+        orig_is_symlink = Path.is_symlink
+        with patch.object(
+            Path,
+            "is_symlink",
+            autospec=True,
+            side_effect=lambda self: True if self.name == "link.txt" else orig_is_symlink(self),
+        ):
+            (repo / "link.txt").write_text("fake_link", encoding="utf-8")
+            with pytest.raises(SecurityViolationError, match="Symbolic link"):
+                compute_repository_manifest(repo)
+
+
+def test_compute_repository_manifest_rejects_unreadable_file(tmp_path):
+    """Verify compute_repository_manifest fails closed on unreadable file."""
+    from app.repositories.security import compute_repository_manifest
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "file.txt").write_text("content", encoding="utf-8")
+
+    with patch(
+        "app.repositories.security.safe_hash_file",
+        side_effect=SecurityViolationError("Cannot read file"),
+    ):
+        with pytest.raises(SecurityViolationError, match="Cannot read file"):
+            compute_repository_manifest(repo)
+
+
+def test_compute_repository_manifest_enforces_limits(tmp_path):
+    """Verify compute_repository_manifest enforces per-file and total size limits."""
+    from app.repositories.security import compute_repository_manifest
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "large.txt").write_text("x" * 200, encoding="utf-8")
+
+    with pytest.raises(SecurityViolationError, match="exceeds limit"):
+        compute_repository_manifest(repo, max_file_size_bytes=100)
+
+    with pytest.raises(SecurityViolationError, match="exceeds limit"):
+        compute_repository_manifest(repo, max_total_bytes=100)
