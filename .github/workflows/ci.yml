@@ -65,3 +65,21 @@ jobs:
       - name: Build Frontend
         working-directory: ./frontend
         run: npm run build
+
+  docker-build:
+    name: Production Container Build & Health Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Production Docker Image
+        run: |
+          docker build -t proofpatch:ci -f Dockerfile .
+
+      - name: Verify Container Health Check & Startup
+        run: |
+          docker run -d --name proofpatch-ci -p 8000:8000 -e PROOFPATCH_MODE=demo proofpatch:ci
+          sleep 5
+          curl --fail --retry 5 --retry-delay 2 http://127.0.0.1:8000/api/health
+          docker stop proofpatch-ci
+          docker rm proofpatch-ci
