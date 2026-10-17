@@ -5,6 +5,15 @@ from app.agents.verification import perform_independent_verification
 
 def test_verification_all_pass(tmp_path):
     """Test verification passes when exit codes and diffs are valid."""
+    ws = tmp_path / "workspace"
+    orig = tmp_path / "original"
+    ws.mkdir(parents=True, exist_ok=True)
+    orig.mkdir(parents=True, exist_ok=True)
+    (ws / "src").mkdir(parents=True, exist_ok=True)
+    (orig / "src").mkdir(parents=True, exist_ok=True)
+    (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
+    (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
+
     patch_diff = """--- a/src/service.py
 +++ b/src/service.py
 @@ -1 +1 @@
@@ -18,8 +27,9 @@ def test_verification_all_pass(tmp_path):
         post_patch_exit_code=0,
         pre_patch_output="FAILED tests/test_service.py::test_service_run - AssertionError\n=== 1 failed, 4 passed ===",
         post_patch_output="================== 5 passed in 0.12s ==================",
-        workspace_dir=tmp_path / "workspace",
-        original_repo_dir=tmp_path / "original",
+        workspace_dir=ws,
+        original_repo_dir=orig,
+        trusted_workspace_root=tmp_path,
     )
     assert is_verified is True
     assert all(c.status == "PASSED" for c in checks)
@@ -246,3 +256,148 @@ def test_verification_rejects_unrelated_baseline_failure(tmp_path):
     assert is_verified is False
     repro_check = next(c for c in checks if c.name == "Defect Reproduction Check")
     assert repro_check.status == "INCONCLUSIVE"
+
+
+def test_verification_missing_original_repository_information(tmp_path):
+    """Verify missing original repository information marks check NOT_RUN and fails verification."""
+    ws = tmp_path / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    patch_diff = """--- a/src/service.py
++++ b/src/service.py
+@@ -1 +1 @@
+-bad
++good
+"""
+    is_verified, checks = perform_independent_verification(
+        patch_diff=patch_diff,
+        modified_files=["src/service.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="1 failed, 4 passed",
+        post_patch_output="5 passed",
+        workspace_dir=ws,
+        original_repo_dir=None,  # Missing original repo info!
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is False
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "NOT_RUN"
+    assert "Original repository directory was not provided" in pres_check.detail
+
+
+def test_verification_workspace_outside_root_fails(tmp_path):
+    """Verify workspace located outside configured workspace root fails verification."""
+    designated_root = tmp_path / "designated_root"
+    designated_root.mkdir()
+    outside_ws = tmp_path / "outside_workspace"
+    outside_ws.mkdir()
+    orig = tmp_path / "original"
+    orig.mkdir()
+
+    patch_diff = """--- a/src/service.py
++++ b/src/service.py
+@@ -1 +1 @@
+-bad
++good
+"""
+    is_verified, checks = perform_independent_verification(
+        patch_diff=patch_diff,
+        modified_files=["src/service.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="1 failed",
+        post_patch_output="5 passed",
+        workspace_dir=outside_ws,
+        original_repo_dir=orig,
+        trusted_workspace_root=designated_root,
+    )
+    assert is_verified is False
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "FAILED"
+    assert "lies outside designated workspace root" in pres_check.detail
+
+
+def test_verification_correct_isolated_workspace_passes(tmp_path):
+    """Verify correct isolated workspace with pristine original source passes audit."""
+    ws = tmp_path / "workspace"
+    orig = tmp_path / "original"
+    (ws / "src").mkdir(parents=True)
+    (orig / "src").mkdir(parents=True)
+    (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
+    (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
+
+    patch_diff = """--- a/src/service.py
++++ b/src/service.py
+@@ -1 +1 @@
+-bad
++good
+"""
+    is_verified, checks = perform_independent_verification(
+        patch_diff=patch_diff,
+        modified_files=["src/service.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="FAILED tests/test_service.py::test_service_run - AssertionError\n=== 1 failed, 4 passed ===",
+        post_patch_output="================== 5 passed in 0.12s ==================",
+        workspace_dir=ws,
+        original_repo_dir=orig,
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is True
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "PASSED"
+    assert "strictly unmodified" in pres_check.detail
+
+
+def test_verification_contradictory_preservation_evidence_fails(tmp_path):
+    """Verify that if original repo files were modified to match the patch, verification fails."""
+    ws = tmp_path / "workspace"
+    orig = tmp_path / "original"
+    (ws / "src").mkdir(parents=True)
+    (orig / "src").mkdir(parents=True)
+    # Contradiction: original repo file was mutated to match post-patch file!
+    (orig / "src" / "service.py").write_text("good\n", encoding="utf-8")
+    (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
+
+    patch_diff = """--- a/src/service.py
++++ b/src/service.py
+@@ -1 +1 @@
+-bad
++good
+"""
+    is_verified, checks = perform_independent_verification(
+        patch_diff=patch_diff,
+        modified_files=["src/service.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="1 failed",
+        post_patch_output="5 passed",
+        workspace_dir=ws,
+        original_repo_dir=orig,
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is False
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "FAILED"
+    assert "Contradictory evidence" in pres_check.detail
+
+
+def test_verification_incomplete_checks_prevent_verified_status(tmp_path):
+    """Verify that any non-passed check prevents the final run from being marked verified."""
+    ws = tmp_path / "workspace"
+    orig = tmp_path / "original"
+    ws.mkdir()
+    orig.mkdir()
+
+    # Pre-patch exit code missing -> reproduction is NOT_RUN
+    is_verified, checks = perform_independent_verification(
+        patch_diff="--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-a\n+b\n",
+        modified_files=["f.py"],
+        pre_patch_exit_code=None,
+        post_patch_exit_code=0,
+        workspace_dir=ws,
+        original_repo_dir=orig,
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is False
+    assert any(c.status != "PASSED" for c in checks)

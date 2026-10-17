@@ -259,6 +259,7 @@ def perform_independent_verification(
     bug_description: str = "",
     reproduction_instructions: str = "",
     timed_out: bool = False,
+    trusted_workspace_root: Optional[Path] = None,
 ) -> Tuple[bool, List[VerificationItem]]:
     """Deterministically audits all claims and outputs before generating final verdict.
 
@@ -393,33 +394,93 @@ def perform_independent_verification(
                 )
             )
 
-    # 5. Original Source Repository Preservation
-    if workspace_dir and original_repo_dir and original_repo_dir.exists():
-        is_isolated = str(workspace_dir.resolve()) != str(original_repo_dir.resolve())
-        if is_isolated:
-            checks.append(
-                VerificationItem(
-                    name="Source Repository Immutability",
-                    status="PASSED",
-                    detail="Patch executed in an isolated workspace copy; original repository source remained unmodified.",
-                )
+    # 5. Original Source Repository Preservation & Workspace Isolation
+    from app.core.config import get_settings
+
+    app_settings = get_settings()
+    workspace_root = (trusted_workspace_root or app_settings.get_workspace_dir()).resolve()
+
+    if not workspace_dir:
+        checks.append(
+            VerificationItem(
+                name="Source Repository Immutability",
+                status="NOT_RUN",
+                detail="Workspace directory was not provided; cannot verify workspace containment or source preservation.",
             )
-        else:
+        )
+    elif not original_repo_dir:
+        checks.append(
+            VerificationItem(
+                name="Source Repository Immutability",
+                status="NOT_RUN",
+                detail="Original repository directory was not provided; cannot establish immutability baseline.",
+            )
+        )
+    else:
+        resolved_ws = workspace_dir.resolve()
+        resolved_orig = original_repo_dir.resolve()
+
+        if not workspace_dir.exists():
             checks.append(
                 VerificationItem(
                     name="Source Repository Immutability",
                     status="FAILED",
-                    detail="Workspace directory collided with original source repository.",
+                    detail="Workspace directory does not exist on disk.",
                 )
             )
-    else:
-        checks.append(
-            VerificationItem(
-                name="Source Repository Immutability",
-                status="PASSED",
-                detail="Workspace isolation verified.",
+        elif not original_repo_dir.exists():
+            checks.append(
+                VerificationItem(
+                    name="Source Repository Immutability",
+                    status="FAILED",
+                    detail="Original repository baseline directory does not exist on disk.",
+                )
             )
-        )
+        elif not resolved_ws.is_relative_to(workspace_root):
+            checks.append(
+                VerificationItem(
+                    name="Source Repository Immutability",
+                    status="FAILED",
+                    detail=f"Workspace path lies outside designated workspace root: {workspace_root.name}.",
+                )
+            )
+        elif resolved_ws == resolved_orig or resolved_ws == Path.cwd().resolve():
+            checks.append(
+                VerificationItem(
+                    name="Source Repository Immutability",
+                    status="FAILED",
+                    detail="Workspace directory collides with original repository source or host working directory.",
+                )
+            )
+        else:
+            # Check for contradictory preservation evidence (did original repo get modified?)
+            contradiction = False
+            for mf in modified_files:
+                orig_file = resolved_orig / mf
+                ws_file = resolved_ws / mf
+                if orig_file.exists() and ws_file.exists():
+                    try:
+                        if orig_file.read_bytes() == ws_file.read_bytes():
+                            contradiction = True
+                            break
+                    except Exception:
+                        pass
+            if contradiction:
+                checks.append(
+                    VerificationItem(
+                        name="Source Repository Immutability",
+                        status="FAILED",
+                        detail="Contradictory evidence: original repository files were modified during repair.",
+                    )
+                )
+            else:
+                checks.append(
+                    VerificationItem(
+                        name="Source Repository Immutability",
+                        status="PASSED",
+                        detail="Patch executed in isolated workspace copy; original repository source remained strictly unmodified.",
+                    )
+                )
 
     # 6. Secret Scrubbing Audit
     secret_found = False

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import uuid
 from typing import Optional
 
@@ -59,6 +60,7 @@ async def execute_live_run(
     run_id = existing_run_id or f"run_{uuid.uuid4().hex[:8]}"
     workspace_root = settings.get_workspace_dir()
     workspace_path = workspace_root / run_id
+    pristine_path = workspace_root / f"pristine_{run_id}"
 
     nebius = nebius_provider or NebiusTokenFactoryProvider()
     tavily = tavily_provider or TavilySearchProvider()
@@ -92,10 +94,17 @@ async def execute_live_run(
         )
         validate_repository_url(request.repository_url)
         commit_hash = await asyncio.to_thread(
-            clone_public_repository, request.repository_url, workspace_path
+            clone_public_repository, request.repository_url, pristine_path
         )
         run.commit_hash = commit_hash
         db.commit()
+
+        # Isolate run execution in a dedicated workspace copy
+        if not pristine_path.exists():
+            pristine_path.mkdir(parents=True, exist_ok=True)
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path)
+        shutil.copytree(pristine_path, workspace_path, symlinks=False)
 
         # Stage 2: Inspection
         inspection = await asyncio.to_thread(inspect_repository, workspace_path)
@@ -159,6 +168,7 @@ async def execute_live_run(
                 pre_patch_output=run.pre_patch_test_output or "",
                 post_patch_output="",
                 workspace_dir=workspace_path,
+                original_repo_dir=pristine_path if pristine_path.exists() else None,
                 bug_title=request.bug_title,
                 bug_description=request.bug_description,
                 reproduction_instructions=getattr(request, "reproduction_instructions", ""),
@@ -462,6 +472,7 @@ Generate a revised, corrected unified diff to fix this error."""
             pre_patch_output=run.pre_patch_test_output or "",
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
+            original_repo_dir=pristine_path if pristine_path.exists() else None,
             bug_title=request.bug_title,
             bug_description=request.bug_description,
             reproduction_instructions=getattr(request, "reproduction_instructions", ""),
@@ -546,3 +557,10 @@ Generate a revised, corrected unified diff to fix this error."""
             await sandbox.cleanup()
         except Exception as cleanup_exc:
             logger.warning("Error during sandbox cleanup: %s", cleanup_exc)
+
+        # Cleanup pristine baseline directory
+        if pristine_path.exists():
+            try:
+                shutil.rmtree(pristine_path, ignore_errors=True)
+            except Exception as rmtree_err:
+                logger.debug("Error cleaning up pristine path %s: %s", pristine_path, rmtree_err)
