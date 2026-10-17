@@ -1,7 +1,6 @@
 """Deterministic zero-credential demo workflow using bundled buggy service."""
 
 import json
-import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,11 +9,15 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.agents.patch_parser import apply_patch_to_workspace
-from app.agents.verification import perform_independent_verification
+from app.agents.verification import (
+    classify_baseline_reproduction,
+    parse_pytest_failures,
+    perform_independent_verification,
+)
 from app.core.config import get_settings
 from app.core.logging import logger
 from app.db.models import RunModel, StageEventModel
-from app.repositories.security import compute_repository_manifest
+from app.repositories.security import compute_repository_manifest, safe_isolate_repository
 from app.sandbox.commands import execute_test_command
 from app.schemas.evidence import TestRecord
 from app.services.evidence import persist_evidence_report
@@ -115,9 +118,13 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
         # Establish baseline manifest of bundled source before copying
         baseline_manifest = compute_repository_manifest(bundled_source)
 
-        if workspace_path.exists():
-            shutil.rmtree(workspace_path)
-        shutil.copytree(bundled_source, workspace_path)
+        # Safely isolate bundled source into disposable workspace without following symlinks
+        safe_isolate_repository(
+            source_dir=bundled_source,
+            target_dir=workspace_path,
+            trusted_workspace_root=settings.get_workspace_dir(),
+            trusted_source_root=bundled_source,
+        )
 
         inspected_files = [
             str(p.relative_to(workspace_path)).replace("\\", "/")
@@ -148,32 +155,79 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
         run.reproduction_output = repro_output
         run.pre_patch_test_output = repro_output
         run.pre_patch_exit_code = repro_exit_code
-        run.reproduced = repro_exit_code != 0
-        db.commit()
 
-        if run.reproduced:
+        # Strict baseline reproduction classification
+        repro_status, repro_reason = classify_baseline_reproduction(
+            exit_code=repro_exit_code,
+            output=repro_output,
+            bug_title=run.bug_title,
+            bug_description=run.bug_description,
+            reproduction_instructions="pytest tests -v",
+            timed_out=False,
+        )
+        failed_tests, _ = parse_pytest_failures(repro_output)
+        expected_failed_test = "test_growth_tier_boundary_six_seats"
+        has_expected_defect = any(expected_failed_test in t for t in failed_tests)
+
+        if repro_status == "PASSED" and has_expected_defect:
+            run.reproduced = True
+            db.commit()
             log_stage_event(
                 db,
                 run_id,
                 "reproduce",
                 "completed",
-                f"Successfully reproduced defect! Baseline tests failed as expected (exit code {repro_exit_code}).",
+                f"Successfully reproduced defect! Baseline tests failed as expected (exit code {repro_exit_code}): {expected_failed_test}.",
                 {
                     "exit_code": repro_exit_code,
-                    "failed_test": "test_growth_tier_boundary_six_seats",
+                    "failed_test": expected_failed_test,
                 },
             )
         else:
+            run.reproduced = False
+            run.status = "inconclusive" if repro_status in ("INCONCLUSIVE", "NOT_RUN") else "failed"
+            failure_detail = repro_reason
+            if repro_status == "PASSED" and not has_expected_defect:
+                failure_detail = f"Expected failing test '{expected_failed_test}' was not among observed failures: {failed_tests}."
             log_stage_event(
                 db,
                 run_id,
                 "reproduce",
                 "failed",
-                "Failed to reproduce defect: baseline test suite unexpectedly passed.",
-                {"exit_code": repro_exit_code},
+                f"Failed to credibly reproduce intended defect: {failure_detail}",
+                {"exit_code": repro_exit_code, "status": run.status},
             )
-            run.status = "inconclusive"
+            # Perform early verification audit reflecting reproduction failure
+            is_verified, checks = perform_independent_verification(
+                patch_diff="",
+                modified_files=[],
+                pre_patch_exit_code=repro_exit_code,
+                post_patch_exit_code=None,
+                pre_patch_output=repro_output,
+                post_patch_output="",
+                workspace_dir=workspace_path,
+                original_repo_dir=bundled_source,
+                baseline_manifest=baseline_manifest,
+                bug_title=run.bug_title,
+                bug_description=run.bug_description,
+            )
+            run.verified = False
             db.commit()
+            persist_evidence_report(
+                db=db,
+                run=run,
+                verification_checks=checks,
+                tests=[
+                    TestRecord(
+                        stage="pre_patch",
+                        command=repro_cmd,
+                        exit_code=repro_exit_code,
+                        passed=False,
+                        output_summary=failure_detail,
+                    )
+                ],
+                tavily_research={"enabled": False, "reason": "demo_mode"},
+            )
             return run
 
         # Stage 3: Diagnosis
@@ -215,18 +269,60 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
         )
         run.patch_diff = DEMO_PATCH_DIFF
 
-        modified = apply_patch_to_workspace(workspace_path, DEMO_PATCH_DIFF)
-        run.modified_files = json.dumps(modified)
-        db.commit()
-
-        log_stage_event(
-            db,
-            run_id,
-            "patch",
-            "completed",
-            f"Applied surgical patch cleanly to {len(modified)} file(s): {', '.join(modified)}.",
-            {"modified_files": modified},
-        )
+        try:
+            modified = apply_patch_to_workspace(workspace_path, DEMO_PATCH_DIFF)
+            run.modified_files = json.dumps(modified)
+            db.commit()
+            log_stage_event(
+                db,
+                run_id,
+                "patch",
+                "completed",
+                f"Applied surgical patch cleanly to {len(modified)} file(s): {', '.join(modified)}.",
+                {"modified_files": modified},
+            )
+        except Exception as patch_err:
+            logger.error("Failed to apply demo patch: %s", patch_err)
+            run.status = "failed"
+            run.error_message = f"Patch application failed: {patch_err}"
+            run.verified = False
+            db.commit()
+            log_stage_event(
+                db,
+                run_id,
+                "patch",
+                "failed",
+                f"Failed to apply patch: {patch_err}",
+            )
+            is_verified, checks = perform_independent_verification(
+                patch_diff=DEMO_PATCH_DIFF,
+                modified_files=[],
+                pre_patch_exit_code=run.pre_patch_exit_code,
+                post_patch_exit_code=None,
+                pre_patch_output=run.pre_patch_test_output or "",
+                post_patch_output="",
+                workspace_dir=workspace_path,
+                original_repo_dir=bundled_source,
+                baseline_manifest=baseline_manifest,
+                bug_title=run.bug_title,
+                bug_description=run.bug_description,
+            )
+            persist_evidence_report(
+                db=db,
+                run=run,
+                verification_checks=checks,
+                tests=[
+                    TestRecord(
+                        stage="pre_patch",
+                        command=repro_cmd,
+                        exit_code=run.pre_patch_exit_code,
+                        passed=False,
+                        output_summary="Baseline test failure reproducing reported defect.",
+                    )
+                ],
+                tavily_research={"enabled": False, "reason": "demo_mode"},
+            )
+            return run
 
         # Stage 6: Regression Testing
         log_stage_event(
@@ -269,8 +365,8 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
         is_verified, checks = perform_independent_verification(
             patch_diff=run.patch_diff,
             modified_files=modified,
-            pre_patch_exit_code=run.pre_patch_exit_code or 1,
-            post_patch_exit_code=run.post_patch_exit_code or 0,
+            pre_patch_exit_code=run.pre_patch_exit_code,
+            post_patch_exit_code=run.post_patch_exit_code,
             pre_patch_output=run.pre_patch_test_output or "",
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
@@ -305,15 +401,23 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
             TestRecord(
                 stage="pre_patch",
                 command="pytest tests -v",
-                exit_code=run.pre_patch_exit_code or 1,
-                passed=False,
+                exit_code=run.pre_patch_exit_code,
+                passed=False
+                if run.pre_patch_exit_code not in (0, None)
+                else (True if run.pre_patch_exit_code == 0 else None),
+                test_status="FAILED"
+                if run.pre_patch_exit_code not in (0, None)
+                else ("PASSED" if run.pre_patch_exit_code == 0 else "NOT_RUN"),
                 output_summary="Failed on test_growth_tier_boundary_six_seats (Expected Growth, got Starter)",
             ),
             TestRecord(
                 stage="post_patch",
                 command="pytest tests -v",
-                exit_code=run.post_patch_exit_code or 0,
-                passed=True,
+                exit_code=run.post_patch_exit_code,
+                passed=run.test_passed if run.post_patch_exit_code is not None else None,
+                test_status="PASSED"
+                if run.test_passed
+                else ("FAILED" if run.post_patch_exit_code is not None else "NOT_RUN"),
                 output_summary="7 passed in 0.08s (all regression tests green)",
             ),
         ]
