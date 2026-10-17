@@ -243,3 +243,124 @@ def test_inspect_repository_ignores_symlinks_and_secrets(tmp_path):
     assert ".env" not in inspection.manifest_files
     if CAN_SYMLINK:
         assert "link.py" not in inspection.source_files
+
+
+def test_strict_transfer_rejects_symlink_file(tmp_path):
+    """Verify that safe_walk_repository with strict_transfer=True aborts immediately on symlinks."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "real.py").write_text("x = 1\n", encoding="utf-8")
+    link = ws / "sym_link.py"
+
+    if CAN_SYMLINK:
+        link.symlink_to(ws / "real.py")
+        with pytest.raises(SecurityViolationError, match="Symbolic link file .* is prohibited"):
+            list(safe_walk_repository(ws, strict_transfer=True))
+    else:
+        with patch.object(Path, "is_symlink", return_value=True):
+            with pytest.raises(SecurityViolationError, match="Symbolic link"):
+                list(safe_walk_repository(ws, strict_transfer=True))
+
+
+def test_strict_transfer_rejects_symlink_dir(tmp_path):
+    """Verify that safe_walk_repository with strict_transfer=True aborts immediately on symlinked directories."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    target_dir = tmp_path / "target_dir"
+    target_dir.mkdir()
+    (target_dir / "mod.py").write_text("y = 2\n", encoding="utf-8")
+    link_dir = ws / "sym_dir"
+
+    if CAN_SYMLINK:
+        link_dir.symlink_to(target_dir, target_is_directory=True)
+        with pytest.raises(
+            SecurityViolationError, match="Symbolic link directory .* is prohibited"
+        ):
+            list(safe_walk_repository(ws, strict_transfer=True))
+    else:
+        with patch.object(Path, "is_symlink", return_value=True):
+            with pytest.raises(SecurityViolationError, match="Symbolic link"):
+                list(safe_walk_repository(ws, strict_transfer=True))
+
+
+def test_strict_transfer_rejects_unreadable_file(tmp_path):
+    """Verify that safe_walk_repository with strict_transfer=True aborts on unreadable files."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    unreadable = ws / "unreadable.py"
+    unreadable.write_text("content\n", encoding="utf-8")
+
+    original_stat = Path.stat
+
+    def mock_stat_err(self, *args, **kwargs):
+        if self.name == "unreadable.py":
+            raise PermissionError("Access denied by OS")
+        return original_stat(self, *args, **kwargs)
+
+    with patch.object(Path, "stat", side_effect=mock_stat_err, autospec=True):
+        with pytest.raises(
+            SecurityViolationError,
+            match=r"(Inaccessible repository file|Failed to check symlink status)",
+        ):
+            list(safe_walk_repository(ws, strict_transfer=True))
+
+
+def test_safe_read_file_bytes_regular_file(tmp_path):
+    """Verify safe_read_file_bytes reads valid file content."""
+    from app.repositories.security import safe_read_file_bytes
+
+    f = tmp_path / "test.txt"
+    f.write_text("hello world", encoding="utf-8")
+    content = safe_read_file_bytes(f, trusted_root=tmp_path, max_bytes=100)
+    assert content == b"hello world"
+
+
+def test_safe_read_file_bytes_rejects_symlink(tmp_path):
+    """Verify safe_read_file_bytes rejects symbolic link."""
+    from app.repositories.security import safe_read_file_bytes
+
+    real = tmp_path / "real.txt"
+    real.write_text("secret", encoding="utf-8")
+    link = tmp_path / "link.txt"
+
+    if CAN_SYMLINK:
+        link.symlink_to(real)
+        with pytest.raises(SecurityViolationError, match="Symbolic links are prohibited"):
+            safe_read_file_bytes(link, trusted_root=tmp_path)
+    else:
+        with patch("os.lstat") as mock_lstat:
+            import stat
+
+            mock_res = type("StatRes", (), {"st_mode": stat.S_IFLNK, "st_size": 10})()
+            mock_lstat.return_value = mock_res
+            with pytest.raises(SecurityViolationError, match="Symbolic links are prohibited"):
+                safe_read_file_bytes(real, trusted_root=tmp_path)
+
+
+def test_safe_read_file_bytes_exceeds_limit(tmp_path):
+    """Verify safe_read_file_bytes rejects files larger than max_bytes."""
+    from app.repositories.security import safe_read_file_bytes
+
+    f = tmp_path / "large.txt"
+    f.write_text("a" * 500, encoding="utf-8")
+    with pytest.raises(SecurityViolationError, match="exceeds limit"):
+        safe_read_file_bytes(f, trusted_root=tmp_path, max_bytes=200)
+
+
+def test_compute_repository_manifest_deterministic(tmp_path):
+    """Verify compute_repository_manifest produces consistent SHA-256 digests."""
+    from app.repositories.security import compute_repository_manifest
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "b.txt").write_text("content B\n", encoding="utf-8")
+    (repo / "a.txt").write_text("content A\n", encoding="utf-8")
+    sub = repo / "sub"
+    sub.mkdir()
+    (sub / "c.txt").write_text("content C\n", encoding="utf-8")
+
+    manifest = compute_repository_manifest(repo)
+    assert list(manifest.keys()) == ["a.txt", "b.txt", "sub/c.txt"]
+    assert len(manifest["a.txt"]) == 64
+    assert len(manifest["b.txt"]) == 64
+    assert len(manifest["sub/c.txt"]) == 64

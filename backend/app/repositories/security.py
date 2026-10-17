@@ -4,11 +4,13 @@ Protects the host environment against symlink directory escapes, unauthorized re
 outside workspace roots, and accidental exfiltration of secrets, keys, or credentials.
 """
 
+import hashlib
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
 from app.core.errors import SecurityViolationError
 from app.core.logging import RE_SECRETS, logger
@@ -159,22 +161,147 @@ def validate_path_containment(candidate: Path, trusted_root: Path) -> Path:
     return resolved_candidate
 
 
+def safe_read_file_bytes(
+    file_path: Path,
+    trusted_root: Optional[Path] = None,
+    max_bytes: Optional[int] = None,
+) -> bytes:
+    """Safely open and read file bytes with defensive symlink, containment, and race checks.
+
+    Where supported (POSIX), uses os.O_NOFOLLOW. On all platforms, checks lstat before open,
+    validates the file descriptor with fstat, verifies regular file mode, confirms metadata
+    consistency, and enforces byte size limits.
+    """
+    if trusted_root is not None:
+        validate_path_containment(file_path, trusted_root)
+
+    # 1. Pre-open lstat inspection (does not follow symlinks)
+    try:
+        lstat_info = os.lstat(file_path)
+    except Exception as exc:
+        raise SecurityViolationError(f"Cannot stat '{file_path.name}': {exc}")
+
+    if stat.S_ISLNK(lstat_info.st_mode):
+        raise SecurityViolationError(
+            f"Symbolic links are prohibited: '{file_path.name}' is a symlink."
+        )
+    if not stat.S_ISREG(lstat_info.st_mode):
+        raise SecurityViolationError(f"Non-regular file cannot be read: '{file_path.name}'.")
+
+    # 2. Open file with O_NOFOLLOW where available
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+
+    fd = None
+    try:
+        fd = os.open(file_path, flags)
+        fstat_info = os.fstat(fd)
+
+        if not stat.S_ISREG(fstat_info.st_mode):
+            raise SecurityViolationError(
+                f"Opened descriptor for '{file_path.name}' is not a regular file."
+            )
+
+        # Inode / device comparison on systems supporting it (POSIX)
+        if hasattr(lstat_info, "st_ino") and hasattr(fstat_info, "st_ino"):
+            if lstat_info.st_ino != 0 and fstat_info.st_ino != 0:
+                if lstat_info.st_ino != fstat_info.st_ino or lstat_info.st_dev != fstat_info.st_dev:
+                    raise SecurityViolationError(
+                        f"Filesystem race detected opening '{file_path.name}'."
+                    )
+
+        if max_bytes is not None and fstat_info.st_size > max_bytes:
+            raise SecurityViolationError(
+                f"File '{file_path.name}' ({fstat_info.st_size} bytes) exceeds limit ({max_bytes} bytes)."
+            )
+
+        with os.fdopen(fd, "rb", closefd=True) as stream:
+            fd = None  # stream now manages the descriptor
+            content = stream.read()
+
+        if max_bytes is not None and len(content) > max_bytes:
+            raise SecurityViolationError(
+                f"File '{file_path.name}' read bytes ({len(content)}) exceeds limit ({max_bytes} bytes)."
+            )
+
+        return content
+    except Exception as exc:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if isinstance(exc, SecurityViolationError):
+            raise
+        raise SecurityViolationError(f"Failed to read file '{file_path.name}': {exc}")
+
+
+def compute_repository_manifest(repo_dir: Path) -> Dict[str, str]:
+    """Deterministically compute SHA-256 hashes of all project files in repo_dir.
+
+    Returns:
+        Mapping of sorted relative POSIX paths to SHA-256 hex digests.
+    """
+    if not repo_dir.exists() or not repo_dir.is_dir():
+        return {}
+
+    manifest: Dict[str, str] = {}
+    for root, dirnames, filenames in os.walk(repo_dir, followlinks=False):
+        # Prune ignored and symlinked directories
+        safe_dirs = []
+        for d in sorted(dirnames):
+            if d.lower() in IGNORED_DIRECTORIES:
+                continue
+            d_path = Path(root) / d
+            try:
+                if d_path.is_symlink():
+                    continue
+            except (OSError, PermissionError):
+                continue
+            safe_dirs.append(d)
+        dirnames[:] = safe_dirs
+
+        for f in sorted(filenames):
+            f_path = Path(root) / f
+            try:
+                if f_path.is_symlink():
+                    continue
+                rel_path = f_path.relative_to(repo_dir).as_posix()
+                content = f_path.read_bytes()
+                manifest[rel_path] = hashlib.sha256(content).hexdigest()
+            except Exception as exc:
+                logger.debug("Error computing manifest entry for %s: %s", f, exc)
+                continue
+
+    return manifest
+
+
 def safe_walk_repository(
     workspace_dir: Path,
     max_files: Optional[int] = None,
     max_file_size_bytes: Optional[int] = None,
     max_total_bytes: Optional[int] = None,
     fail_on_limits: bool = False,
-) -> Generator[SafeFileEntry, None, Dict[str, int]]:
+    strict_transfer: bool = False,
+) -> Generator[SafeFileEntry, None, Dict[str, Any]]:
     """Safely traverse workspace files, rejecting symlinks, sensitive files, and enforcing bounds.
 
-    Yields SafeFileEntry objects.
-    Returns summary stats upon completion.
+    In strict_transfer mode, any symlink, unreadable file, unresolvable path, or non-regular
+    file aborts the transfer by raising SecurityViolationError, ensuring no remote repository
+    transfer is silently incomplete.
+
+    Yields:
+        SafeFileEntry objects.
+    Returns:
+        Summary dictionary containing counts and list of excluded sensitive files.
     """
     resolved_root = workspace_dir.resolve()
     total_files = 0
     total_bytes = 0
-    excluded_sensitive_count = 0
+    excluded_sensitive_files: List[Tuple[str, str]] = []
 
     for root, dirnames, filenames in os.walk(workspace_dir, followlinks=False):
         root_path = Path(root)
@@ -182,10 +309,18 @@ def safe_walk_repository(
         # Defensive: check if current directory is a symlink
         try:
             if root_path.is_symlink():
+                if strict_transfer:
+                    raise SecurityViolationError(
+                        f"Symbolic link directory '{root_path.name}' is prohibited in strict transfer mode; aborting transfer."
+                    )
                 logger.warning("Skipping symlinked directory traversal: %s", root_path.name)
                 dirnames.clear()
                 continue
         except (OSError, PermissionError) as dir_err:
+            if strict_transfer:
+                raise SecurityViolationError(
+                    f"Failed to inspect directory '{root_path.name}' in strict transfer mode: {dir_err}"
+                )
             logger.debug("Error inspecting directory %s: %s", root_path, dir_err)
             dirnames.clear()
             continue
@@ -198,9 +333,17 @@ def safe_walk_repository(
                 continue
             try:
                 if d_path.is_symlink():
+                    if strict_transfer:
+                        raise SecurityViolationError(
+                            f"Symbolic link directory '{d}' is prohibited in strict transfer mode; aborting transfer."
+                        )
                     logger.warning("Skipping symlinked directory: %s", d)
                     continue
-            except (OSError, PermissionError):
+            except (OSError, PermissionError) as sym_dir_err:
+                if strict_transfer:
+                    raise SecurityViolationError(
+                        f"Failed to inspect directory '{d}' in strict transfer mode: {sym_dir_err}"
+                    )
                 continue
             safe_dirs.append(d)
         dirnames[:] = safe_dirs
@@ -209,15 +352,27 @@ def safe_walk_repository(
             file_path = root_path / f
             try:
                 rel_path = file_path.relative_to(workspace_dir).as_posix()
-            except ValueError:
+            except ValueError as val_err:
+                if strict_transfer:
+                    raise SecurityViolationError(
+                        f"Failed to compute relative path for '{f}' in strict transfer mode: {val_err}"
+                    )
                 continue
 
             # 1. Reject symlinks immediately
             try:
                 if file_path.is_symlink():
+                    if strict_transfer:
+                        raise SecurityViolationError(
+                            f"Symbolic link file '{rel_path}' is prohibited in strict transfer mode; aborting transfer."
+                        )
                     logger.warning("Skipping symbolic link: %s", rel_path)
                     continue
             except (OSError, PermissionError) as sym_err:
+                if strict_transfer:
+                    raise SecurityViolationError(
+                        f"Failed to check symlink status for '{rel_path}' in strict transfer mode: {sym_err}"
+                    )
                 logger.debug("Skipping inaccessible file %s: %s", rel_path, sym_err)
                 continue
 
@@ -225,37 +380,46 @@ def safe_walk_repository(
             try:
                 resolved_file = file_path.resolve()
                 if not resolved_file.is_relative_to(resolved_root):
-                    logger.warning("Skipping path outside workspace containment: %s", rel_path)
-                    continue
+                    raise SecurityViolationError(
+                        f"Path containment violation: '{rel_path}' resolves outside workspace root."
+                    )
             except Exception as resolve_err:
-                logger.debug("Skipping unresolvable path %s: %s", rel_path, resolve_err)
+                if strict_transfer or isinstance(resolve_err, SecurityViolationError):
+                    raise SecurityViolationError(
+                        f"Path validation failed for '{rel_path}': {resolve_err}"
+                    )
                 continue
 
             # 3. Exclude sensitive and secret-bearing files
             is_secret, reason = is_sensitive_file(file_path, rel_path)
             if is_secret:
-                excluded_sensitive_count += 1
+                excluded_sensitive_files.append((rel_path, reason))
                 logger.info("Excluding sensitive repository file [%s]: %s", reason, rel_path)
                 continue
 
             # 4. Check regular file status and bounds
             try:
                 stat_result = file_path.stat()
-                # Check for non-regular files (fifos, sockets, character devices)
-                import stat
-
                 if not stat.S_ISREG(stat_result.st_mode):
+                    if strict_transfer:
+                        raise SecurityViolationError(
+                            f"Non-regular file '{rel_path}' is prohibited in strict transfer mode; aborting transfer."
+                        )
                     logger.debug("Skipping non-regular file: %s", rel_path)
                     continue
 
                 size = stat_result.st_size
             except (OSError, PermissionError) as stat_err:
+                if strict_transfer:
+                    raise SecurityViolationError(
+                        f"Inaccessible repository file '{rel_path}' in strict transfer mode: {stat_err}; aborting transfer."
+                    )
                 logger.debug("Skipping inaccessible file %s: %s", rel_path, stat_err)
                 continue
 
             # 5. Check per-file size limit
             if max_file_size_bytes is not None and size > max_file_size_bytes:
-                if fail_on_limits:
+                if fail_on_limits or strict_transfer:
                     raise SecurityViolationError(
                         f"Repository file '{rel_path}' size ({size} bytes) exceeds maximum "
                         f"allowed per-file limit ({max_file_size_bytes} bytes)."
@@ -265,7 +429,7 @@ def safe_walk_repository(
 
             # 6. Check cumulative size limit
             if max_total_bytes is not None and (total_bytes + size) > max_total_bytes:
-                if fail_on_limits:
+                if fail_on_limits or strict_transfer:
                     raise SecurityViolationError(
                         f"Total repository transfer size ({total_bytes + size} bytes) exceeds "
                         f"cumulative limit ({max_total_bytes} bytes)."
@@ -275,7 +439,7 @@ def safe_walk_repository(
 
             # 7. Check file count limit
             if max_files is not None and (total_files + 1) > max_files:
-                if fail_on_limits:
+                if fail_on_limits or strict_transfer:
                     raise SecurityViolationError(
                         f"Repository file count ({total_files + 1}) exceeds maximum "
                         f"allowed file limit ({max_files})."
@@ -290,5 +454,6 @@ def safe_walk_repository(
     return {
         "total_files": total_files,
         "total_bytes": total_bytes,
-        "excluded_sensitive_count": excluded_sensitive_count,
+        "excluded_sensitive_files": excluded_sensitive_files,
+        "excluded_sensitive_count": len(excluded_sensitive_files),
     }

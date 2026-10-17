@@ -513,3 +513,80 @@ async def test_token_factory_sandbox_bootstrap_remote_failure(tmp_path):
     backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
     with pytest.raises(ProviderError, match="dependency installation failed"):
         await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_strict_transfer_rejects_symlink(tmp_path):
+    """Verify transfer_workspace aborts on symlinks in strict transfer mode."""
+    (tmp_path / "real.py").write_text("x = 1\n", encoding="utf-8")
+    link = tmp_path / "link.py"
+
+    from tests.test_repository_security import CAN_SYMLINK
+
+    if CAN_SYMLINK:
+        link.symlink_to(tmp_path / "real.py")
+    else:
+        # Patch is_symlink to simulate symlink existence
+        pass
+
+    mock_image = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    if CAN_SYMLINK:
+        with pytest.raises(ProviderError, match="Repository transfer rejected by security policy"):
+            await backend.transfer_workspace(tmp_path)
+    else:
+        from pathlib import Path
+
+        with patch.object(Path, "is_symlink", return_value=True):
+            with pytest.raises(
+                ProviderError, match="Repository transfer rejected by security policy"
+            ):
+                await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_strict_transfer_rejects_unreadable_file(tmp_path):
+    """Verify transfer_workspace aborts on unreadable files in strict transfer mode."""
+    from pathlib import Path
+
+    (tmp_path / "broken.py").write_text("y = 2\n", encoding="utf-8")
+
+    mock_image = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+
+    original_stat = Path.stat
+
+    def mock_stat_err(self, *args, **kwargs):
+        if self.name == "broken.py":
+            raise PermissionError("EACCES")
+        return original_stat(self, *args, **kwargs)
+
+    with patch.object(Path, "stat", side_effect=mock_stat_err, autospec=True):
+        with pytest.raises(ProviderError, match="Repository transfer rejected by security policy"):
+            await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_strict_transfer_succeeds_for_regular_files(tmp_path):
+    """Verify transfer_workspace transfers regular files into ConTree sandbox."""
+    (tmp_path / "app.py").write_text("print('hello')", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("pytest\n", encoding="utf-8")
+
+    mock_image = AsyncMock()
+    mock_image.exit_code = 0
+    mock_image.run = AsyncMock(return_value=mock_image)
+
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    await backend.transfer_workspace(tmp_path)
+
+    assert mock_image.run.await_count >= 2
+    assert backend._files_transferred is True

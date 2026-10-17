@@ -17,7 +17,7 @@ STATUS: Integration-tested with unit mocks. Requires live Nebius Token Factory /
 
 import asyncio
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 try:
     from contree_client.httpx import ContreeAsyncClient
@@ -132,7 +132,7 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
 
     async def transfer_workspace(self, workspace_dir: Path) -> None:
         """Collect bounded repository contents from workspace_dir and transfer into remote sandbox."""
-        from app.repositories.security import safe_walk_repository
+        from app.repositories.security import safe_read_file_bytes, safe_walk_repository
 
         self._validate_credentials()
         if not self._remote_image:
@@ -143,22 +143,45 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
 
         # Scan files with strict security traversal and bounded limits (fail-closed)
         files_to_transfer: Dict[str, bytes] = {}
+        seen_destinations: Set[str] = set()
+        walker = safe_walk_repository(
+            workspace_dir=workspace_dir,
+            max_files=settings.max_repository_files,
+            max_file_size_bytes=settings.max_file_size_bytes,
+            max_total_bytes=settings.max_repository_transfer_bytes,
+            fail_on_limits=True,
+            strict_transfer=True,
+        )
+
         try:
-            for entry in safe_walk_repository(
-                workspace_dir=workspace_dir,
-                max_files=settings.max_repository_files,
-                max_file_size_bytes=settings.max_file_size_bytes,
-                max_total_bytes=settings.max_repository_transfer_bytes,
-                fail_on_limits=True,
-            ):
+            for entry in walker:
+                rel_posix = entry.rel_path.replace("\\", "/")
+                dest_path = PurePosixPath(f"/workspace/{rel_posix}")
+                if not str(dest_path).startswith("/workspace/") or ".." in dest_path.parts:
+                    raise SecurityViolationError(
+                        f"Unsafe destination path '{dest_path}' escapes /workspace mount."
+                    )
+                dest_str = str(dest_path)
+                if dest_str in seen_destinations:
+                    raise SecurityViolationError(
+                        f"Duplicate upload destination path detected: '{dest_str}'"
+                    )
+                seen_destinations.add(dest_str)
+
                 try:
-                    remote_dest = f"/workspace/{entry.rel_path}"
-                    files_to_transfer[remote_dest] = entry.path.read_bytes()
+                    content = safe_read_file_bytes(
+                        entry.path,
+                        trusted_root=workspace_dir,
+                        max_bytes=settings.max_file_size_bytes,
+                    )
+                    files_to_transfer[dest_str] = content
                 except Exception as read_err:
-                    logger.error("Failed to read repository file %s: %s", entry.rel_path, read_err)
+                    logger.error(
+                        "Failed to safely read repository file %s: %s", entry.rel_path, read_err
+                    )
                     raise ProviderError(
                         "TokenFactorySandbox",
-                        f"Failed to read repository file '{entry.rel_path}': {read_err}",
+                        f"Failed to safely read repository file '{entry.rel_path}': {read_err}",
                         status_code=502,
                     )
         except SecurityViolationError as sec_err:
@@ -392,18 +415,29 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
 
         # 2. Synchronize modified files into remote sandbox
         if self._remote_image and modified:
-            from app.repositories.security import validate_path_containment
+            from app.repositories.security import safe_read_file_bytes, validate_path_containment
 
             patch_specs = []
+            seen_destinations = set()
             if UploadFileSpec is not None:
                 for rel_file in modified:
                     local_file = workspace_dir / rel_file
                     safe_file = validate_path_containment(local_file, workspace_dir)
+                    rel_posix = rel_file.replace("\\", "/")
+                    dest_str = f"/workspace/{rel_posix}"
+                    if dest_str in seen_destinations:
+                        continue
+                    seen_destinations.add(dest_str)
                     if safe_file.is_file():
+                        content = safe_read_file_bytes(
+                            safe_file,
+                            trusted_root=workspace_dir,
+                            max_bytes=settings.max_file_size_bytes,
+                        )
                         patch_specs.append(
                             UploadFileSpec(
-                                path=PurePosixPath(f"/workspace/{rel_file}"),
-                                source=safe_file.read_bytes(),
+                                path=PurePosixPath(dest_str),
+                                source=content,
                             )
                         )
 
@@ -422,7 +456,13 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
                     local_file = workspace_dir / rel_file
                     safe_file = validate_path_containment(local_file, workspace_dir)
                     if safe_file.is_file():
-                        remote_patch_files[f"/workspace/{rel_file}"] = safe_file.read_bytes()
+                        rel_posix = rel_file.replace("\\", "/")
+                        dest_str = f"/workspace/{rel_posix}"
+                        remote_patch_files[dest_str] = safe_read_file_bytes(
+                            safe_file,
+                            trusted_root=workspace_dir,
+                            max_bytes=settings.max_file_size_bytes,
+                        )
                 if remote_patch_files:
                     self._remote_image = await self._remote_image.apply_files(remote_patch_files)
 
