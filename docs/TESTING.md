@@ -11,16 +11,16 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | **Backend Configuration** | `pytest` | 4 tests | Tests default demo mode, Nebius detection, Tavily detection, and secret exclusion. |
 | **Demo Workflow** | `pytest` | 1 test | End-to-end local reproduction, patching, regression pass, and evidence generation. |
 | **Git & Repositories** | `pytest` | 6 tests | Tests public GitHub URL parsing, credential rejection, scheme verification. |
-| **Repository Security Controls** | `pytest` | 11 tests | Tests symlink rejection, path containment, sensitive file exclusion (.env, keys, credentials), allowed templates, stat errors, and patch target safety. |
+| **Repository Security Controls** | `pytest` | 18 tests | Tests symlink rejection, path containment, sensitive file exclusion (.env, keys, credentials), allowed templates, stat errors, strict transfer fail-closed behavior, safe file reading with race protection, and deterministic SHA-256 manifests. |
 | **Nebius Provider** | `pytest` | 6 tests | Mocks OpenAI-compatible completions, non-NVIDIA model rejection, 401 auth, timeouts. |
 | **Tavily Provider** | `pytest` | 3 tests | Mocks search queries, disabled status, and network connection fallbacks. |
 | **Patch Parser & Security** | `pytest` | 6 tests | Path traversal rejection (`../`), diff size caps, clean hunk application. |
 | **Run Management API** | `pytest` | 5 tests | Endpoints for `/api/health`, `/api/config-status`, `/api/runs`, `/api/runs/demo`, 404 handling. |
-| **Execution Sandboxes** | `pytest` | 26 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree SDK lifecycle, client construction, UploadFileSpec file transfer, patch apply, valid zero exit codes, nonzero exit codes, missing exit code rejection, invalid exit code rejection, per-file limits, cumulative limits, file count limits, bootstrap exit codes, timeouts, and resource cleanup. |
-| **Deterministic Verifier** | `pytest` | 18 tests | Audits missing exit codes, inconclusive baseline tests, unrelated failures, import errors, collection errors, timeouts, contradictory post-patch outputs, secrets, missing original repo info, workspace root containment, and contradictory preservation evidence. |
+| **Execution Sandboxes** | `pytest` | 29 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree SDK lifecycle, client construction, UploadFileSpec file transfer, patch apply, valid zero exit codes, nonzero exit codes, missing exit code rejection, invalid exit code rejection, per-file limits, cumulative limits, file count limits, bootstrap exit codes, strict symlink and unreadable file aborts, timeouts, and resource cleanup. |
+| **Deterministic Verifier** | `pytest` | 21 tests | Audits missing exit codes, inconclusive baseline tests, unrelated failures, import errors, collection errors, timeouts, contradictory post-patch outputs, secrets, missing original repo info, workspace root containment, pristine repository before/after manifest match, added/removed file detection in pristine checkout, and missing baseline manifests. |
 | **Async Orchestrator Integration** | `pytest` | 6 tests | Full async workflow with mocked Nebius, Tavily, strict baseline gating on unrelated failures, collection errors, timeouts, and provider error handling. |
 | **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
-| **Total Automated Tests** | | **95 tests** | **100% Pass Rate** |
+| **Total Automated Tests** | | **108 tests** | **100% Pass Rate** |
 
 ---
 

@@ -8,7 +8,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](backend/)
 [![React: 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
-[![Tests: 95 Passed](https://img.shields.io/badge/Tests-95%20Passed-10B981)](docs/TESTING.md)
+[![Tests: 108 Passed](https://img.shields.io/badge/Tests-108%20Passed-10B981)](docs/TESTING.md)
 
 ---
 
@@ -36,7 +36,7 @@ ProofPatch transforms bug fixing from an ungrounded chat interaction into a **tr
 6. **Validates** patch security (strictly preventing path traversal, protected files, and bounding byte caps).
 7. **Executes** regression tests in isolated sandboxes (`Exit Code == 0`).
 8. **Audits** 6 independent verification criteria before declaring success.
-9. **Persists** an immutable, downloadable evidence report with raw command logs.
+9. **Persists** a structured, downloadable evidence report with raw command logs.
 
 ---
 
@@ -210,10 +210,10 @@ Click **Run Demo Repair** in the top navigation bar. ProofPatch will:
 
 ## Running the Automated Test Suites
 
-ProofPatch includes 95 automated tests that execute with **zero external API requests**:
+ProofPatch includes 108 automated tests that execute with **zero external API requests**:
 
 ```bash
-# Backend pytest suite (92 tests)
+# Backend pytest suite (105 tests)
 pytest backend/tests -v
 
 # Backend code style and formatting

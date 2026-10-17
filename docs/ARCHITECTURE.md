@@ -84,7 +84,7 @@ stateDiagram-v2
    - If tests fail, feeds failure trace back to the model for a revised patch.
    - Strict caps: `MAX_PATCH_ITERATIONS=2`, `MAX_MODEL_CALLS_PER_RUN=4`.
 9. **Stage 9: Independent Verification**:
-   - Deterministically audits 6 concrete claims (exit codes, diff syntax, scope confinement, immutability of original repo, secret scrubbing).
+   - Deterministically audits 6 concrete claims (exit codes, diff syntax, scope confinement, pristine source repository before/after SHA-256 manifest immutability & workspace containment, and secret scrubbing).
    - Marks status as `PASSED`, `FAILED`, `NOT_RUN`, or `INCONCLUSIVE`.
 10. **Stage 10: Evidence Report**:
     - Generates downloadable Markdown and JSON evidence documents with raw command logs and audit tables.
@@ -113,7 +113,7 @@ To prevent third-party code execution vulnerabilities, ProofPatch establishes th
 - Official Nebius ConTree cloud container sandbox adapter using official `contree-sdk` and `contree-client` (`ContreeAsyncClient`, `Contree`, `ContreeImage`, `UploadFileSpec`).
 - Lifecycle:
   1. `acquire_session()`: creates configured `ContreeAsyncClient` (with token, base URL, timeout, and retry policy) from `contree_client.httpx`, passes it into `Contree(api_client)`, and acquires a container session (`python:3.11-slim`) via `client.images.use(image, strict=True)`.
-  2. `transfer_workspace()`: scans bounded repository files, transfers them via `UploadFileSpec` in `image.run(shell="mkdir -p /workspace", files=upload_specs, disposable=False)`, and bootstraps project dependencies in-container using detected manifests (`requirements.txt`, `pyproject.toml`, `setup.py`) plus `pytest`.
+  2. `transfer_workspace()`: scans repository files using strict fail-closed traversal (`strict_transfer=True`), aborting immediately on symlink files, symlink directories, unreadable files, or non-regular files; validates destination path safety and uniqueness; excludes secrets; enforces cumulative and per-file byte limits before in-memory reads; transfers allowed files via `UploadFileSpec` in `image.run(shell="mkdir -p /workspace", files=upload_specs, disposable=False)`; and strictly validates dependency bootstrap exit codes (`None`, malformed, or nonzero exit codes fail closed).
   3. `execute_tests()`: runs test commands inside the container (`/workspace`) with state preservation (`disposable=False`) via `image.run()`. Strictly extracts `exit_code`, rejects missing or malformed exit codes, and surfaces genuine stdout/stderr.
   4. `apply_patch()`: applies diff locally, then synchronizes modified files to the remote container via `UploadFileSpec` in `image.run(shell="true", files=patch_specs, disposable=False)`.
   5. `cleanup()`: explicitly awaits `api_client.close()`, disposing remote container sessions and network sockets upon run completion.
