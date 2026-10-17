@@ -464,41 +464,56 @@ def perform_independent_verification(
             )
         else:
             # Recompute pristine checkout manifest and verify exact match with baseline
-            after_manifest = compute_repository_manifest(original_repo_dir)
-
-            added_files = sorted(list(set(after_manifest.keys()) - set(baseline_manifest.keys())))
-            removed_files = sorted(list(set(baseline_manifest.keys()) - set(after_manifest.keys())))
-            modified_files_in_pristine = sorted(
-                [
-                    k
-                    for k in (set(baseline_manifest.keys()) & set(after_manifest.keys()))
-                    if baseline_manifest[k] != after_manifest[k]
-                ]
-            )
-
-            if added_files or removed_files or modified_files_in_pristine:
-                diff_summary = []
-                if added_files:
-                    diff_summary.append(f"added={added_files[:3]}")
-                if removed_files:
-                    diff_summary.append(f"removed={removed_files[:3]}")
-                if modified_files_in_pristine:
-                    diff_summary.append(f"modified={modified_files_in_pristine[:3]}")
+            try:
+                after_manifest = compute_repository_manifest(original_repo_dir)
+            except Exception as sec_err:
                 checks.append(
                     VerificationItem(
                         name="Source Repository Immutability",
                         status="FAILED",
-                        detail=f"Contradictory preservation evidence: pristine repository was altered during repair operations ({', '.join(diff_summary)}).",
+                        detail=f"Integrity check failed: manifest computation failed on pristine checkout ({sec_err}).",
                     )
                 )
-            else:
-                checks.append(
-                    VerificationItem(
-                        name="Source Repository Immutability",
-                        status="PASSED",
-                        detail=f"Pristine repository source remained strictly unmodified (verified before/after manifest match across {len(baseline_manifest)} files in isolated checkout).",
-                    )
+                after_manifest = None
+
+            if after_manifest is not None:
+                added_files = sorted(
+                    list(set(after_manifest.keys()) - set(baseline_manifest.keys()))
                 )
+                removed_files = sorted(
+                    list(set(baseline_manifest.keys()) - set(after_manifest.keys()))
+                )
+                modified_files_in_pristine = sorted(
+                    [
+                        k
+                        for k in (set(baseline_manifest.keys()) & set(after_manifest.keys()))
+                        if baseline_manifest[k] != after_manifest[k]
+                    ]
+                )
+
+                if added_files or removed_files or modified_files_in_pristine:
+                    diff_summary = []
+                    if added_files:
+                        diff_summary.append(f"added={added_files[:3]}")
+                    if removed_files:
+                        diff_summary.append(f"removed={removed_files[:3]}")
+                    if modified_files_in_pristine:
+                        diff_summary.append(f"modified={modified_files_in_pristine[:3]}")
+                    checks.append(
+                        VerificationItem(
+                            name="Source Repository Immutability",
+                            status="FAILED",
+                            detail=f"Contradictory preservation evidence: pristine repository was altered during repair operations ({', '.join(diff_summary)}).",
+                        )
+                    )
+                else:
+                    checks.append(
+                        VerificationItem(
+                            name="Source Repository Immutability",
+                            status="PASSED",
+                            detail=f"Pristine repository source remained strictly unmodified (verified before/after manifest match across {len(baseline_manifest)} files in isolated checkout).",
+                        )
+                    )
 
     # 6. Secret Scrubbing Audit
     secret_found = False
