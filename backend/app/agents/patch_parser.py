@@ -78,8 +78,12 @@ def validate_patch_security(patch_diff: str, max_bytes: int = MAX_PATCH_BYTES) -
 
 def apply_patch_to_file(file_path: Path, patch_text: str) -> None:
     """Apply a unified diff hunk series directly to a single file."""
+    if file_path.is_symlink():
+        raise SecurityViolationError(
+            f"Modifying symbolic link targets is strictly prohibited: '{file_path.name}'"
+        )
     if not file_path.is_file():
-        raise PatchApplicationError(f"Target file does not exist: {file_path}")
+        raise PatchApplicationError(f"Target file does not exist: '{file_path.name}'")
 
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         original_lines = f.readlines()
@@ -184,11 +188,13 @@ def apply_patch_to_file(file_path: Path, patch_text: str) -> None:
     with open(file_path, "w", encoding="utf-8", newline="") as f:
         f.writelines(modified_lines)
 
-    logger.info("Successfully patched file: %s", file_path)
+    logger.info("Successfully patched file: %s", file_path.name)
 
 
 def apply_patch_to_workspace(workspace_dir: Path, patch_diff: str) -> List[str]:
     """Parse, validate, and apply unified diff across workspace files."""
+    from app.repositories.security import validate_path_containment
+
     validate_patch_security(patch_diff)
 
     # Split patch per file if multiple files exist
@@ -205,11 +211,10 @@ def apply_patch_to_workspace(workspace_dir: Path, patch_diff: str) -> List[str]:
             continue
 
         target_rel = file_targets[0]
-        target_path = (workspace_dir / target_rel).resolve()
+        raw_target = workspace_dir / target_rel
 
-        # Workspace boundary check
-        if not str(target_path).startswith(str(workspace_dir.resolve())):
-            raise SecurityViolationError(f"Target path lies outside workspace: {target_rel}")
+        # Validate path containment and strictly reject symlinks
+        target_path = validate_path_containment(raw_target, workspace_dir)
 
         apply_patch_to_file(target_path, file_patch)
         modified_files.append(target_rel)

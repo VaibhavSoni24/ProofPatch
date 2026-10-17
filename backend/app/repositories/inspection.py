@@ -39,6 +39,8 @@ def inspect_repository(
     max_context_chars: int = 40000,
 ) -> RepositoryInspection:
     """Inspect repository files safely within bounds."""
+    from app.repositories.security import safe_walk_repository
+
     source_files: List[str] = []
     test_files: List[str] = []
     manifest_files: List[str] = []
@@ -46,28 +48,25 @@ def inspect_repository(
 
     total_chars = 0
 
-    for file_path in repo_dir.rglob("*"):
-        if not file_path.is_file():
-            continue
+    for entry in safe_walk_repository(
+        workspace_dir=repo_dir,
+        max_files=max_files,
+        fail_on_limits=False,
+    ):
+        rel_path = entry.rel_path
+        filename = entry.path.name
 
-        # Skip ignored directories
-        parts = file_path.parts
-        if any(ignored in parts for ignored in IGNORED_DIRECTORIES):
-            continue
-
-        rel_path = str(file_path.relative_to(repo_dir)).replace("\\", "/")
-
-        if file_path.name in ("pyproject.toml", "requirements.txt", "setup.py", "Pipfile"):
+        if filename in ("pyproject.toml", "requirements.txt", "setup.py", "Pipfile"):
             manifest_files.append(rel_path)
-        elif "test" in file_path.name.lower() and file_path.suffix == ".py":
+        elif "test" in filename.lower() and entry.path.suffix == ".py":
             test_files.append(rel_path)
-        elif file_path.suffix == ".py":
+        elif entry.path.suffix == ".py":
             source_files.append(rel_path)
 
         # Collect bounded context snippet for key files
         if len(context_contents) < 15 and total_chars < max_context_chars:
             try:
-                content = file_path.read_text(encoding="utf-8", errors="replace")
+                content = entry.path.read_text(encoding="utf-8", errors="replace")
                 if len(content) < 10000:
                     context_contents[rel_path] = content
                     total_chars += len(content)
