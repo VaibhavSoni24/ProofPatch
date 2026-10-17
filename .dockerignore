@@ -1,0 +1,42 @@
+# Source control and CI
+.git
+.github
+
+# Python artifacts
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.tox
+
+# Node / Frontend development artifacts
+node_modules
+*/node_modules
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Runtime data and local databases (safe bundled fixtures in examples/ remain included)
+data/*.db
+data/*.sqlite
+data/workspaces/*
+data/test_workspaces/*
+
+# Secrets and local environments
+.env
+*.env
+*.pem
+*.key
+*.pfx
+*.pkcs12
+
+# Logs and OS metadata
+*.log
+.DS_Store
+Thumbs.db

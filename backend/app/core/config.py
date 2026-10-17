@@ -2,8 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,9 +20,17 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "ProofPatch"
     app_env: str = "development"
-    app_host: str = "127.0.0.1"
-    app_port: int = 8000
+    app_host: str = Field(
+        default="0.0.0.0",
+        validation_alias=AliasChoices("APP_HOST", "HOST", "app_host"),
+    )
+    app_port: int = Field(
+        default=8000,
+        validation_alias=AliasChoices("PORT", "APP_PORT", "app_port"),
+    )
     frontend_port: int = 5173
+    serve_frontend: bool = True
+    frontend_dist_dir: Optional[str] = None
 
     # Execution Mode: "demo" (deterministic offline) or "live" (Nebius + Tavily)
     proofpatch_mode: Literal["demo", "live"] = "demo"
@@ -87,6 +96,30 @@ class Settings(BaseSettings):
         path = Path(self.workspace_root).resolve()
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def get_frontend_dist_dir(self) -> Optional[Path]:
+        """Return the resolved Path to the frontend distribution directory if it exists."""
+        if not self.serve_frontend or self.frontend_dist_dir == "disabled":
+            return None
+
+        if self.frontend_dist_dir:
+            custom_path = Path(self.frontend_dist_dir).resolve()
+            if custom_path.is_dir() and (custom_path / "index.html").is_file():
+                return custom_path
+            return None
+
+        # Candidate paths for production container and local repository layouts
+        candidates = [
+            Path("/app/frontend/dist"),
+            Path("frontend/dist").resolve(),
+            Path("../frontend/dist").resolve(),
+            Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist",
+        ]
+        for candidate in candidates:
+            if candidate.is_dir() and (candidate / "index.html").is_file():
+                return candidate.resolve()
+
+        return None
 
 
 @lru_cache()
