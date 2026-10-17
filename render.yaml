@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: proofpatch
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: 'off'
+    envVars:
+      - key: PROOFPATCH_MODE
+        value: demo
+      - key: APP_NAME
+        value: ProofPatch
+      - key: APP_ENV
+        value: production
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        value: sqlite:////app/data/proofpatch.db
+      - key: WORKSPACE_ROOT
+        value: /app/data/workspaces
+      - key: NEBIUS_API_KEY
+        sync: false
+      - key: NEBIUS_MODEL
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: CONTREE_TOKEN
+        sync: false

@@ -1,31 +1,29 @@
-version: '3.8'
-
 services:
-  backend:
+  proofpatch:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
+    image: proofpatch:latest
+    container_name: proofpatch-app
     ports:
       - "8000:8000"
     environment:
       - APP_NAME=ProofPatch
-      - APP_ENV=development
+      - APP_ENV=production
       - APP_HOST=0.0.0.0
-      - APP_PORT=8000
-      - PROOFPATCH_MODE=demo
-      - DATABASE_URL=sqlite:///./data/proofpatch.db
-      - WORKSPACE_ROOT=./data/workspaces
+      - PORT=8000
+      - PROOFPATCH_MODE=${PROOFPATCH_MODE:-demo}
+      - DATABASE_URL=sqlite:////app/data/proofpatch.db
+      - WORKSPACE_ROOT=/app/data/workspaces
+      - NEBIUS_API_KEY=${NEBIUS_API_KEY:-}
+      - NEBIUS_MODEL=${NEBIUS_MODEL:-}
+      - NEBIUS_BASE_URL=${NEBIUS_BASE_URL:-https://api.tokenfactory.nebius.com/v1/}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - TAVILY_ENABLED=${TAVILY_ENABLED:-false}
+      - CONTREE_TOKEN=${CONTREE_TOKEN:-}
     volumes:
       - proofpatch-data:/app/data
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
+    restart: unless-stopped
 
 volumes:
   proofpatch-data:
