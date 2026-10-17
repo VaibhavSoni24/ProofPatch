@@ -1,6 +1,5 @@
-"""Unit tests for independent verification engine."""
-
 from app.agents.verification import perform_independent_verification
+from app.repositories.security import compute_repository_manifest
 
 
 def test_verification_all_pass(tmp_path):
@@ -13,6 +12,7 @@ def test_verification_all_pass(tmp_path):
     (orig / "src").mkdir(parents=True, exist_ok=True)
     (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
     (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
+    manifest = compute_repository_manifest(orig)
 
     patch_diff = """--- a/src/service.py
 +++ b/src/service.py
@@ -29,6 +29,7 @@ def test_verification_all_pass(tmp_path):
         post_patch_output="================== 5 passed in 0.12s ==================",
         workspace_dir=ws,
         original_repo_dir=orig,
+        baseline_manifest=manifest,
         trusted_workspace_root=tmp_path,
     )
     assert is_verified is True
@@ -324,6 +325,7 @@ def test_verification_correct_isolated_workspace_passes(tmp_path):
     (ws / "src").mkdir(parents=True)
     (orig / "src").mkdir(parents=True)
     (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
+    manifest = compute_repository_manifest(orig)
     (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
 
     patch_diff = """--- a/src/service.py
@@ -341,6 +343,7 @@ def test_verification_correct_isolated_workspace_passes(tmp_path):
         post_patch_output="================== 5 passed in 0.12s ==================",
         workspace_dir=ws,
         original_repo_dir=orig,
+        baseline_manifest=manifest,
         trusted_workspace_root=tmp_path,
     )
     assert is_verified is True
@@ -350,12 +353,15 @@ def test_verification_correct_isolated_workspace_passes(tmp_path):
 
 
 def test_verification_contradictory_preservation_evidence_fails(tmp_path):
-    """Verify that if original repo files were modified to match the patch, verification fails."""
+    """Verify that if original repo files were modified during repair, verification fails."""
     ws = tmp_path / "workspace"
     orig = tmp_path / "original"
     (ws / "src").mkdir(parents=True)
     (orig / "src").mkdir(parents=True)
-    # Contradiction: original repo file was mutated to match post-patch file!
+    (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
+    manifest = compute_repository_manifest(orig)
+
+    # Mutation: original repo file was modified during repair operations!
     (orig / "src" / "service.py").write_text("good\n", encoding="utf-8")
     (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
 
@@ -374,12 +380,105 @@ def test_verification_contradictory_preservation_evidence_fails(tmp_path):
         post_patch_output="5 passed",
         workspace_dir=ws,
         original_repo_dir=orig,
+        baseline_manifest=manifest,
         trusted_workspace_root=tmp_path,
     )
     assert is_verified is False
     pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
     assert pres_check.status == "FAILED"
-    assert "Contradictory evidence" in pres_check.detail
+    assert "Contradictory preservation evidence" in pres_check.detail
+
+
+def test_verification_added_or_removed_files_in_pristine_fails(tmp_path):
+    """Verify that adding or deleting files in pristine checkout causes verification failure."""
+    ws = tmp_path / "workspace"
+    orig = tmp_path / "original"
+    (ws / "src").mkdir(parents=True)
+    (orig / "src").mkdir(parents=True)
+    (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
+    manifest = compute_repository_manifest(orig)
+
+    # Add an unexpected file to pristine checkout
+    (orig / "src" / "unexpected.txt").write_text("injected\n", encoding="utf-8")
+    (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
+
+    patch_diff = """--- a/src/service.py
++++ b/src/service.py
+@@ -1 +1 @@
+-bad
++good
+"""
+    is_verified, checks = perform_independent_verification(
+        patch_diff=patch_diff,
+        modified_files=["src/service.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="1 failed",
+        post_patch_output="5 passed",
+        workspace_dir=ws,
+        original_repo_dir=orig,
+        baseline_manifest=manifest,
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is False
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "FAILED"
+    assert "added=" in pres_check.detail
+
+
+def test_verification_missing_baseline_manifest_marks_not_run(tmp_path):
+    """Verify that missing baseline manifest marks immutability check as NOT_RUN and fails verification."""
+    ws = tmp_path / "workspace"
+    orig = tmp_path / "original"
+    (ws / "src").mkdir(parents=True)
+    (orig / "src").mkdir(parents=True)
+    (orig / "src" / "service.py").write_text("bad\n", encoding="utf-8")
+    (ws / "src" / "service.py").write_text("good\n", encoding="utf-8")
+
+    patch_diff = """--- a/src/service.py
++++ b/src/service.py
+@@ -1 +1 @@
+-bad
++good
+"""
+    is_verified, checks = perform_independent_verification(
+        patch_diff=patch_diff,
+        modified_files=["src/service.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="1 failed",
+        post_patch_output="5 passed",
+        workspace_dir=ws,
+        original_repo_dir=orig,
+        baseline_manifest=None,  # Missing baseline manifest!
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is False
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "NOT_RUN"
+    assert "manifest was not established" in pres_check.detail
+
+
+def test_verification_missing_pristine_checkout_marks_not_run(tmp_path):
+    """Verify missing original repository path marks immutability check as NOT_RUN."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "f.py").write_text("good\n", encoding="utf-8")
+
+    is_verified, checks = perform_independent_verification(
+        patch_diff="--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-bad\n+good\n",
+        modified_files=["f.py"],
+        pre_patch_exit_code=1,
+        post_patch_exit_code=0,
+        pre_patch_output="1 failed",
+        post_patch_output="5 passed",
+        workspace_dir=ws,
+        original_repo_dir=None,  # Missing pristine checkout!
+        trusted_workspace_root=tmp_path,
+    )
+    assert is_verified is False
+    pres_check = next(c for c in checks if c.name == "Source Repository Immutability")
+    assert pres_check.status == "NOT_RUN"
 
 
 def test_verification_incomplete_checks_prevent_verified_status(tmp_path):
@@ -388,6 +487,7 @@ def test_verification_incomplete_checks_prevent_verified_status(tmp_path):
     orig = tmp_path / "original"
     ws.mkdir()
     orig.mkdir()
+    manifest = compute_repository_manifest(orig)
 
     # Pre-patch exit code missing -> reproduction is NOT_RUN
     is_verified, checks = perform_independent_verification(
@@ -397,6 +497,7 @@ def test_verification_incomplete_checks_prevent_verified_status(tmp_path):
         post_patch_exit_code=0,
         workspace_dir=ws,
         original_repo_dir=orig,
+        baseline_manifest=manifest,
         trusted_workspace_root=tmp_path,
     )
     assert is_verified is False

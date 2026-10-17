@@ -14,6 +14,7 @@ from app.agents.verification import perform_independent_verification
 from app.core.config import get_settings
 from app.core.logging import logger
 from app.db.models import RunModel, StageEventModel
+from app.repositories.security import compute_repository_manifest
 from app.sandbox.commands import execute_test_command
 from app.schemas.evidence import TestRecord
 from app.services.evidence import persist_evidence_report
@@ -111,6 +112,9 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
             "started",
             "Copying bundled buggy Python service into isolated workspace...",
         )
+        # Establish baseline manifest of bundled source before copying
+        baseline_manifest = compute_repository_manifest(bundled_source)
+
         if workspace_path.exists():
             shutil.rmtree(workspace_path)
         shutil.copytree(bundled_source, workspace_path)
@@ -271,6 +275,7 @@ def execute_demo_run(db: Session, existing_run_id: Optional[str] = None) -> RunM
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
             original_repo_dir=bundled_source,
+            baseline_manifest=baseline_manifest,
             bug_title=run.bug_title,
             bug_description=run.bug_description,
         )

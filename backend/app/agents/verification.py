@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from app.agents.patch_parser import validate_patch_security
 from app.core.logging import RE_SECRETS
@@ -254,6 +254,7 @@ def perform_independent_verification(
     post_patch_output: str = "",
     workspace_dir: Optional[Path] = None,
     original_repo_dir: Optional[Path] = None,
+    baseline_manifest: Optional[Dict[str, str]] = None,
     pre_patch_output: str = "",
     bug_title: str = "",
     bug_description: str = "",
@@ -396,6 +397,7 @@ def perform_independent_verification(
 
     # 5. Original Source Repository Preservation & Workspace Isolation
     from app.core.config import get_settings
+    from app.repositories.security import compute_repository_manifest
 
     app_settings = get_settings()
     workspace_root = (trusted_workspace_root or app_settings.get_workspace_dir()).resolve()
@@ -416,27 +418,27 @@ def perform_independent_verification(
                 detail="Original repository directory was not provided; cannot establish immutability baseline.",
             )
         )
+    elif not workspace_dir.exists():
+        checks.append(
+            VerificationItem(
+                name="Source Repository Immutability",
+                status="FAILED",
+                detail="Workspace directory does not exist on disk.",
+            )
+        )
+    elif not original_repo_dir.exists():
+        checks.append(
+            VerificationItem(
+                name="Source Repository Immutability",
+                status="FAILED",
+                detail="Original repository baseline directory does not exist on disk.",
+            )
+        )
     else:
         resolved_ws = workspace_dir.resolve()
         resolved_orig = original_repo_dir.resolve()
 
-        if not workspace_dir.exists():
-            checks.append(
-                VerificationItem(
-                    name="Source Repository Immutability",
-                    status="FAILED",
-                    detail="Workspace directory does not exist on disk.",
-                )
-            )
-        elif not original_repo_dir.exists():
-            checks.append(
-                VerificationItem(
-                    name="Source Repository Immutability",
-                    status="FAILED",
-                    detail="Original repository baseline directory does not exist on disk.",
-                )
-            )
-        elif not resolved_ws.is_relative_to(workspace_root):
+        if not resolved_ws.is_relative_to(workspace_root):
             checks.append(
                 VerificationItem(
                     name="Source Repository Immutability",
@@ -452,25 +454,41 @@ def perform_independent_verification(
                     detail="Workspace directory collides with original repository source or host working directory.",
                 )
             )
+        elif baseline_manifest is None:
+            checks.append(
+                VerificationItem(
+                    name="Source Repository Immutability",
+                    status="NOT_RUN",
+                    detail="Pristine repository baseline manifest was not established prior to repair operations.",
+                )
+            )
         else:
-            # Check for contradictory preservation evidence (did original repo get modified?)
-            contradiction = False
-            for mf in modified_files:
-                orig_file = resolved_orig / mf
-                ws_file = resolved_ws / mf
-                if orig_file.exists() and ws_file.exists():
-                    try:
-                        if orig_file.read_bytes() == ws_file.read_bytes():
-                            contradiction = True
-                            break
-                    except Exception:
-                        pass
-            if contradiction:
+            # Recompute pristine checkout manifest and verify exact match with baseline
+            after_manifest = compute_repository_manifest(original_repo_dir)
+
+            added_files = sorted(list(set(after_manifest.keys()) - set(baseline_manifest.keys())))
+            removed_files = sorted(list(set(baseline_manifest.keys()) - set(after_manifest.keys())))
+            modified_files_in_pristine = sorted(
+                [
+                    k
+                    for k in (set(baseline_manifest.keys()) & set(after_manifest.keys()))
+                    if baseline_manifest[k] != after_manifest[k]
+                ]
+            )
+
+            if added_files or removed_files or modified_files_in_pristine:
+                diff_summary = []
+                if added_files:
+                    diff_summary.append(f"added={added_files[:3]}")
+                if removed_files:
+                    diff_summary.append(f"removed={removed_files[:3]}")
+                if modified_files_in_pristine:
+                    diff_summary.append(f"modified={modified_files_in_pristine[:3]}")
                 checks.append(
                     VerificationItem(
                         name="Source Repository Immutability",
                         status="FAILED",
-                        detail="Contradictory evidence: original repository files were modified during repair.",
+                        detail=f"Contradictory preservation evidence: pristine repository was altered during repair operations ({', '.join(diff_summary)}).",
                     )
                 )
             else:
@@ -478,7 +496,7 @@ def perform_independent_verification(
                     VerificationItem(
                         name="Source Repository Immutability",
                         status="PASSED",
-                        detail="Patch executed in isolated workspace copy; original repository source remained strictly unmodified.",
+                        detail=f"Pristine repository source remained strictly unmodified (verified before/after manifest match across {len(baseline_manifest)} files in isolated checkout).",
                     )
                 )
 

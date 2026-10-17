@@ -28,6 +28,7 @@ from app.providers.nebius import NebiusTokenFactoryProvider
 from app.providers.tavily import TavilySearchProvider
 from app.repositories.git import clone_public_repository, validate_repository_url
 from app.repositories.inspection import inspect_repository
+from app.repositories.security import compute_repository_manifest
 from app.sandbox.base import BaseExecutionBackend
 from app.sandbox.factory import get_execution_backend
 from app.schemas.evidence import TestRecord
@@ -102,6 +103,10 @@ async def execute_live_run(
         # Isolate run execution in a dedicated workspace copy
         if not pristine_path.exists():
             pristine_path.mkdir(parents=True, exist_ok=True)
+
+        # Establish deterministic pristine repository baseline manifest before repair
+        baseline_manifest = await asyncio.to_thread(compute_repository_manifest, pristine_path)
+
         if workspace_path.exists():
             shutil.rmtree(workspace_path)
         shutil.copytree(pristine_path, workspace_path, symlinks=False)
@@ -169,6 +174,7 @@ async def execute_live_run(
                 post_patch_output="",
                 workspace_dir=workspace_path,
                 original_repo_dir=pristine_path if pristine_path.exists() else None,
+                baseline_manifest=baseline_manifest if pristine_path.exists() else None,
                 bug_title=request.bug_title,
                 bug_description=request.bug_description,
                 reproduction_instructions=getattr(request, "reproduction_instructions", ""),
@@ -473,6 +479,7 @@ Generate a revised, corrected unified diff to fix this error."""
             post_patch_output=run.post_patch_test_output or "",
             workspace_dir=workspace_path,
             original_repo_dir=pristine_path if pristine_path.exists() else None,
+            baseline_manifest=baseline_manifest if pristine_path.exists() else None,
             bug_title=request.bug_title,
             bug_description=request.bug_description,
             reproduction_instructions=getattr(request, "reproduction_instructions", ""),
