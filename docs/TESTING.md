@@ -19,8 +19,9 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | **Execution Sandboxes** | `pytest` | 29 tests | Tests Local backend, Docker fail-closed behavior, and Token Factory ConTree SDK lifecycle, client construction, UploadFileSpec file transfer, patch apply, valid zero exit codes, nonzero exit codes, missing exit code rejection, invalid exit code rejection, per-file limits, cumulative limits, file count limits, bootstrap exit codes, strict symlink and unreadable file aborts, timeouts, and resource cleanup. |
 | **Deterministic Verifier** | `pytest` | 21 tests | Audits missing exit codes, inconclusive baseline tests, unrelated failures, import errors, collection errors, timeouts, contradictory post-patch outputs, secrets, missing original repo info, workspace root containment, pristine repository before/after manifest match, added/removed file detection in pristine checkout, and missing baseline manifests. |
 | **Async Orchestrator Integration** | `pytest` | 6 tests | Full async workflow with mocked Nebius, Tavily, strict baseline gating on unrelated failures, collection errors, timeouts, and provider error handling. |
+| **Production Static & SPA Serving** | `pytest` | 8 tests | Production root HTML serving, dev JSON fallback, valid asset serving, SPA client-side history navigation, /api/health preservation, and path traversal security controls. |
 | **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
-| **Total Automated Tests** | | **123 tests** | **100% Pass Rate** |
+| **Total Automated Tests** | | **131 tests** | **100% Pass Rate** |
 
 ---
 

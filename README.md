@@ -8,7 +8,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](backend/)
 [![React: 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
-[![Tests: 123 Passed](https://img.shields.io/badge/Tests-123%20Passed-10B981)](docs/TESTING.md)
+[![Tests: 131 Passed](https://img.shields.io/badge/Tests-131%20Passed-10B981)](docs/TESTING.md)
 
 ---
 
@@ -44,6 +44,7 @@ ProofPatch transforms bug fixing from an ungrounded chat interaction into a **tr
 
 - **Observable Evidence Workflow**: Every claim is backed by real executed commands, timestamps, and exit codes. Never presents a generated explanation as a success without executable proof. Missing exit codes are strictly rejected and never defaulted to success.
 - **Zero-Credit Offline Demonstration**: Ships with a deterministic local demo featuring an intentionally buggy SaaS billing service (`examples/buggy-python-service/`). Runs out of the box on an ordinary laptop with zero API keys or cloud GPUs.
+- **Unified Production Container**: Multi-stage root `Dockerfile` packages the React frontend and asynchronous FastAPI backend into a single container serving both API and static assets from the same origin on port 8000.
 - **Nebius Token Factory Adapter**: Fully asynchronous OpenAI-compatible adapter targeting eligible open-source **NVIDIA** reasoning models.
 - **Nebius ConTree Sandbox Integration**: Uses official `contree-sdk` and `contree-client` (`ContreeAsyncClient`, `Contree`, `UploadFileSpec`) for isolated cloud container sessions, transferring bounded repository files via `image.run(files=[...], disposable=False)`, installing manifest dependencies in-container, enforcing strict exit code validation, and releasing resources cleanly upon completion.
 - **Tavily Research Integration**: Targeted asynchronous search retrieving real documentation, change logs, and technical discussions.
@@ -88,6 +89,7 @@ graph TD
 - **Inference Integration**: Asynchronous OpenAI-compatible adapter for Nebius Token Factory (`api.tokenfactory.nebius.com`).
 - **Research Integration**: Asynchronous Tavily Search API client.
 - **Isolation & Sandboxing**: `LocalExecutionBackend` (demo only), `DockerExecutionBackend` (non-networked local container), and `TokenFactorySandboxBackend` (Nebius ConTree cloud container runtime).
+- **Production Packaging**: Multi-stage Docker container serving unified SPA + API on port 8000, Docker Compose, and Render Blueprint (`render.yaml`).
 
 ---
 
@@ -95,21 +97,24 @@ graph TD
 
 ```
 ProofPatch/
-├── .github/workflows/ci.yml       # GitHub Actions automated test & build pipeline
+├── .github/workflows/ci.yml       # GitHub Actions automated test & build pipeline (backend, frontend, docker)
 ├── .env.example                   # Authoritative configuration template
 ├── .editorconfig                  # Consistent formatting rules across languages
 ├── .gitignore                     # Strictly ignores .env, virtualenvs, local databases
+├── .dockerignore                  # Strict exclusion rules for container build
+├── Dockerfile                     # Multi-stage production container (Node 20 build + Python 3.11 runtime)
+├── docker-compose.yml             # Single-command local containerized deployment
+├── render.yaml                    # Render Blueprint specification for Docker web service
 ├── Makefile                       # Development task orchestration
-├── docker-compose.yml             # Local containerized deployment
 ├── LICENSE                        # MIT License
 ├── SECURITY.md                    # Vulnerability reporting and security architecture
 ├── CONTRIBUTING.md                # Contribution guidelines and commit discipline
 │
 ├── backend/                       # Python FastAPI Backend
 │   ├── pyproject.toml             # Python package metadata and dependencies
-│   ├── Dockerfile                 # Backend container definition
+│   ├── Dockerfile                 # Standalone backend container definition
 │   ├── app/
-│   │   ├── main.py                # FastAPI entrypoint and CORS setup
+│   │   ├── main.py                # FastAPI entrypoint, SPA static serving, CORS setup
 │   │   ├── api/                   # REST endpoints (health, config-status, runs)
 │   │   ├── core/                  # Settings, structured logging, error hierarchy
 │   │   ├── db/                    # SQLAlchemy models, SQLite session
@@ -119,7 +124,7 @@ ProofPatch/
 │   │   ├── agents/                # Async orchestrator, prompts, patch parser, and verifier
 │   │   ├── sandbox/               # Local, Docker, and Token Factory ConTree sandbox backends
 │   │   └── services/              # Demo runner, evidence generator, run manager
-│   └── tests/                     # 92 backend unit, security, sandbox & verifier tests
+│   └── tests/                     # 128 backend unit, security, sandbox, static & verifier tests
 │
 ├── frontend/                      # React TypeScript Frontend
 │   ├── package.json               # Node dependencies and scripts
@@ -210,10 +215,10 @@ Click **Run Demo Repair** in the top navigation bar. ProofPatch will:
 
 ## Running the Automated Test Suites
 
-ProofPatch includes 123 automated tests that execute with **zero external API requests**:
+ProofPatch includes 131 automated tests that execute with **zero external API requests**:
 
 ```bash
-# Backend pytest suite (120 tests)
+# Backend pytest suite (128 tests)
 pytest backend/tests -v
 
 # Backend code style and formatting
@@ -232,6 +237,44 @@ npm run build
 Or run the all-in-one verification script:
 - **Windows**: `.\scripts\check.ps1`
 - **Linux/macOS**: `./scripts/check.sh`
+
+---
+
+## Production Container & Cloud Deployment
+
+ProofPatch packages the React frontend and FastAPI backend into a single production Docker container that serves both static assets and API routes from the same origin on port 8000.
+
+### 1. Run with Docker Compose (Local Single-Container Demo)
+```bash
+docker compose up --build
+```
+- Opens at `http://localhost:8000` serving the built frontend and backend together.
+- Defaults safely to `PROOFPATCH_MODE=demo` (requires no external API keys or cloud credentials).
+- Automatically runs as unprivileged user `proofpatch` and stores persistent SQLite data in the `proofpatch-data` volume.
+
+### 2. Manual Docker Build & Run
+```bash
+# Build multi-stage image
+docker build -t proofpatch:latest .
+
+# Run container on port 8000
+docker run -d --name proofpatch -p 8000:8000 -e PROOFPATCH_MODE=demo proofpatch:latest
+
+# Verify health endpoint
+curl http://localhost:8000/api/health
+```
+
+### 3. Deploying a Public Demo (Render Blueprint)
+For a publicly accessible web demo URL:
+1. Connect your GitHub repository to [Render](https://render.com).
+2. Create a new **Blueprint** service pointing to the included [`render.yaml`](render.yaml).
+3. Render automatically builds the multi-stage `Dockerfile` and configures the `/api/health` health check.
+
+> [!NOTE]
+> **Free Tier Hosting Considerations**:
+> - **Spin-Down & Cold Start**: Free web services on Render spin down after 15 minutes of inactivity. When a request arrives, waking the container takes approximately 50 seconds.
+> - **Ephemeral Storage**: Free instances use an ephemeral filesystem. Local SQLite runs and temporary workspaces reset when the container restarts. Persistent storage requires an attached disk (available on paid tiers).
+> - **Zero-Credit Demo Safety**: The Blueprint defaults to `PROOFPATCH_MODE=demo`. The public demo executes the deterministic boundary defect repair without consuming inference credits.
 
 ---
 

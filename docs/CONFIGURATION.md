@@ -10,9 +10,11 @@ This document provides a comprehensive reference for all configuration options a
 |---|---|---|---|---|
 | `APP_NAME` | `string` | `ProofPatch` | No | Display name of the application. |
 | `APP_ENV` | `string` | `development` | No | Environment runtime (`development`, `test`, `production`). |
-| `APP_HOST` | `string` | `127.0.0.1` | No | Host IP address the backend server binds to. |
-| `APP_PORT` | `integer` | `8000` | No | Port for backend REST API. |
+| `APP_HOST` | `string` | `0.0.0.0` | No | Host IP address the backend server binds to (supports `HOST` or `APP_HOST`). |
+| `APP_PORT` / `PORT` | `integer` | `8000` | No | Port for backend REST API and single-container web service. Honors cloud hosting platforms' `PORT` environment variable (e.g., Render, Railway). |
 | `FRONTEND_PORT` | `integer` | `5173` | No | Default Vite development server port. |
+| `SERVE_FRONTEND` | `boolean` | `true` | No | Set to `false` to disable frontend static asset serving in backend-only development. |
+| `FRONTEND_DIST_DIR` | `string` | `""` | No | Explicit path to compiled frontend assets (`dist`). Auto-discovered by default. |
 | `PROOFPATCH_MODE` | `string` | `demo` | **Yes** | Execution mode: `demo` (zero-credential offline sample workflow) or `live` (invokes Nebius Token Factory & Tavily). |
 | `NEBIUS_API_KEY` | `string` | `""` | Only in `live` mode | API Key for Nebius Token Factory OpenAI-compatible inference. Must NEVER be committed to Git. |
 | `NEBIUS_BASE_URL` | `string` | `https://api.tokenfactory.nebius.com/v1/` | No | OpenAI-compatible endpoint URL for Nebius Token Factory. |
