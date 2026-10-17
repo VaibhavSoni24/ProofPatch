@@ -27,7 +27,9 @@ This document provides a comprehensive reference for all configuration options a
 | `MAX_PATCH_ITERATIONS` | `integer` | `2` | No | Maximum number of repair loops if post-patch tests fail. |
 | `MODEL_TIMEOUT_SECONDS` | `integer` | `90` | No | HTTP timeout (seconds) when calling Nebius Token Factory. |
 | `SANDBOX_TIMEOUT_SECONDS` | `integer` | `60` | No | Execution timeout (seconds) for running test runner commands in isolated workspaces. |
-| `MAX_REPOSITORY_FILES` | `integer` | `300` | No | Upper bound on files scanned during repository inspection to avoid memory overflow. |
+| `MAX_REPOSITORY_FILES` | `integer` | `300` | No | Upper bound on files scanned during repository inspection to avoid memory overflow. Fails closed on transfer if exceeded. |
+| `MAX_FILE_SIZE_BYTES` | `integer` | `500000` | No | Maximum permitted individual file size (bytes) transferred into sandbox (500KB default). Fails closed if exceeded. |
+| `MAX_REPOSITORY_TRANSFER_BYTES` | `integer` | `10000000` | No | Cumulative byte limit for total repository transfer payload (10MB default). Fails closed if exceeded. |
 | `MAX_CONTEXT_CHARACTERS` | `integer` | `40000` | No | Upper bound on source code characters injected into prompt context. |
 | `MAX_PATCH_BYTES` | `integer` | `50000` | No | Maximum permitted byte size for an incoming unified diff patch. Rejects oversized patches. |
 | `DATABASE_URL` | `string` | `sqlite:///./data/proofpatch.db` | No | SQLAlchemy database connection URI. Local SQLite file by default. |

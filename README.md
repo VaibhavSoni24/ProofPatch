@@ -8,7 +8,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](backend/)
 [![React: 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
-[![Tests: 72 Passed](https://img.shields.io/badge/Tests-72%20Passed-10B981)](docs/TESTING.md)
+[![Tests: 95 Passed](https://img.shields.io/badge/Tests-95%20Passed-10B981)](docs/TESTING.md)
 
 ---
 
@@ -119,7 +119,7 @@ ProofPatch/
 │   │   ├── agents/                # Async orchestrator, prompts, patch parser, and verifier
 │   │   ├── sandbox/               # Local, Docker, and Token Factory ConTree sandbox backends
 │   │   └── services/              # Demo runner, evidence generator, run manager
-│   └── tests/                     # 46 backend unit, sandbox & mocked provider tests
+│   └── tests/                     # 92 backend unit, security, sandbox & verifier tests
 │
 ├── frontend/                      # React TypeScript Frontend
 │   ├── package.json               # Node dependencies and scripts
@@ -210,10 +210,10 @@ Click **Run Demo Repair** in the top navigation bar. ProofPatch will:
 
 ## Running the Automated Test Suites
 
-ProofPatch includes 49 automated tests that execute with **zero external API requests**:
+ProofPatch includes 95 automated tests that execute with **zero external API requests**:
 
 ```bash
-# Backend pytest suite (46 tests)
+# Backend pytest suite (92 tests)
 pytest backend/tests -v
 
 # Backend code style and formatting

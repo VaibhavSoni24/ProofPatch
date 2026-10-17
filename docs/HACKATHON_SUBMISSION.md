@@ -11,7 +11,7 @@
 
 ## 1. Project Summary
 
-ProofPatch is an autonomous bug-fixing developer tool that transforms generative AI code suggestions into an observable, verified software engineering pipeline. Rather than generating code and asking developers to trust it, ProofPatch autonomously inspects repositories, reproduces reported defects via real test execution, synthesizes minimal unified diffs, runs post-patch regression suites in isolated sandboxes, and compiles immutable audit reports with raw command outputs, exit codes, and verification checks.
+ProofPatch is an autonomous bug-fixing developer tool that transforms generative AI code suggestions into an observable, verified software engineering pipeline. Rather than generating code and asking developers to trust it, ProofPatch autonomously inspects repositories, reproduces reported defects via real test execution, synthesizes minimal unified diffs, runs post-patch regression suites in isolated sandboxes, and compiles structured, auditable evidence reports with raw command outputs, exit codes, and verification checks.
 
 ---
 
@@ -26,9 +26,9 @@ Generative AI coding tools frequently suggest hallucinated or plausible-sounding
 ProofPatch bridges generative AI and software engineering rigor through an evidence-first workflow:
 
 1. **Observable Defect Reproduction**: Executes test commands in isolated workspaces before patching to prove the bug exists (Exit Code != 0). Halts as `INCONCLUSIVE` if tests pass or fail due to unrelated environment issues.
-2. **Surgical Unified Diffs**: Synthesizes minimal diffs validated against path traversal (`../`), protected files, and strict size caps.
-3. **Deterministic Verification Audit**: Independently evaluates 6 concrete claims (exit codes, diff syntax, scope confinement, immutability of original source, and secret scrubbing).
-4. **Isolated Execution Backends**: Supports local Docker isolation (`--network none`, memory & CPU caps) and official Nebius ConTree cloud container sandboxes (`token_factory_sandbox`).
+2. **Surgical Unified Diffs**: Synthesizes minimal diffs validated against path traversal (`../`), symlink escapes, protected files, and strict size caps.
+3. **Deterministic Verification Audit**: Independently evaluates 6 concrete claims (exit codes, diff syntax, scope confinement, source repository preservation & workspace isolation, and secret scrubbing).
+4. **Isolated Execution Backends**: Supports local Docker isolation (`--network none`, memory & CPU caps) and official Nebius ConTree cloud container sandboxes (`token_factory_sandbox`) with symlink rejection and fail-closed transfer limits.
 5. **Zero-Token Local Demo**: Ships with an offline demo featuring an intentionally buggy SaaS billing service (Issue #104) that requires zero API keys or cloud hardware.
 6. **Downloadable Audit Artifacts**: Persists structured Markdown and JSON reports for compliance and code review.
 
@@ -62,7 +62,7 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 - **Lifecycle Implementation**:
   - Client construction: initializes configured `ContreeAsyncClient` (with token, base URL, timeout, and retry policy) from `contree_client.httpx` and passes it into `Contree(api_client)`.
   - Image acquisition via `client.images.use("python:3.11-slim", strict=True)`.
-  - Workspace file transfer: scans bounded repository files and transfers them into the remote container via `UploadFileSpec` in `image.run(shell="mkdir -p /workspace", files=upload_specs, disposable=False)`, followed by containerized dependency setup (`requirements.txt`, `pyproject.toml`, `setup.py` + `pytest`).
+  - Workspace file transfer: safely walks repository rejecting symlinks and secret-bearing files, enforces cumulative and per-file transfer limits (failing closed if bounds are exceeded), and transfers allowed files into the remote container via `UploadFileSpec` in `image.run(shell="mkdir -p /workspace", files=upload_specs, disposable=False)`, followed by containerized dependency setup (`requirements.txt`, `pyproject.toml`, `setup.py` + `pytest`).
   - Command execution via `image.run(cwd="/workspace", disposable=False)` with state preservation across subsequent commands.
   - Strict outcome verification: extracts genuine exit codes, rejecting missing, null, or malformed exit codes to prevent false-positive test claims.
   - Patch synchronization: applies unified diff to local working copy and uploads modified files to container via `UploadFileSpec` in `image.run()`.
@@ -90,7 +90,7 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 - [x] Nebius Token Factory adapter with eligible NVIDIA model configuration.
 - [x] Nebius ConTree Token Factory sandbox adapter implementation via official `contree-sdk` and `contree-client`.
 - [x] Tavily Search API research integration.
-- [x] Passing backend tests (69 tests) and frontend tests (3 tests) — 72 automated tests total.
+- [x] Passing backend tests (92 tests) and frontend tests (3 tests) — 95 automated tests total.
 - [x] Automated CI workflow (`.github/workflows/ci.yml`).
 - [ ] Add valid `NEBIUS_API_KEY` and select active model in `.env` before live demonstration.
 - [ ] Record and upload 2-3 minute YouTube demonstration video (see `docs/DEMO_SCRIPT.md`).
