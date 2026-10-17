@@ -8,7 +8,7 @@
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](backend/)
 [![React: 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)](backend/)
-[![Tests: 108 Passed](https://img.shields.io/badge/Tests-108%20Passed-10B981)](docs/TESTING.md)
+[![Tests: 123 Passed](https://img.shields.io/badge/Tests-123%20Passed-10B981)](docs/TESTING.md)
 
 ---
 
@@ -210,10 +210,10 @@ Click **Run Demo Repair** in the top navigation bar. ProofPatch will:
 
 ## Running the Automated Test Suites
 
-ProofPatch includes 108 automated tests that execute with **zero external API requests**:
+ProofPatch includes 123 automated tests that execute with **zero external API requests**:
 
 ```bash
-# Backend pytest suite (105 tests)
+# Backend pytest suite (120 tests)
 pytest backend/tests -v
 
 # Backend code style and formatting

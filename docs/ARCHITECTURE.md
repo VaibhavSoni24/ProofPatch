@@ -59,12 +59,13 @@ stateDiagram-v2
 
 ### Stage Breakdown
 
-1. **Stage 1: Repository Acquisition**:
+1. **Stage 1: Repository Acquisition & Safe Isolation**:
    - Validates public GitHub URLs (rejecting credentials, insecure schemes, and malformed paths).
-   - Shallow clones into an isolated temporary workspace directory under `data/workspaces/<run_id>`.
+   - Shallow clones into an isolated pristine checkout directory under `data/workspaces/pristine_<run_id>`.
+   - Computes baseline cryptographic manifest and safely isolates repository into a disposable workspace `data/workspaces/run_<run_id>` using `safe_isolate_repository` without following symlinks, failing closed on any symlinked file or directory, path escape, or inaccessible file.
 2. **Stage 2: Repository Inspection**:
    - Bounded directory scan ignoring `.git`, virtual environments, caches, and build folders.
-   - Discovers test manifests (`pyproject.toml`, `requirements.txt`) and source/test files.
+   - Discovers test manifests (`pyproject.toml`, `requirements.txt`) and source/test files using safe read checks without symlink dereferencing.
 3. **Stage 3: Bug Reproduction**:
    - Executes allowlisted pytest command inside the selected sandbox backend (`LocalExecutionBackend` for demo, `DockerExecutionBackend` or `TokenFactorySandboxBackend` for live).
    - Captures stdout/stderr and return code.
@@ -84,7 +85,7 @@ stateDiagram-v2
    - If tests fail, feeds failure trace back to the model for a revised patch.
    - Strict caps: `MAX_PATCH_ITERATIONS=2`, `MAX_MODEL_CALLS_PER_RUN=4`.
 9. **Stage 9: Independent Verification**:
-   - Deterministically audits 6 concrete claims (exit codes, diff syntax, scope confinement, pristine source repository before/after SHA-256 manifest immutability & workspace containment, and secret scrubbing).
+   - Deterministically audits 6 concrete claims (exit codes, diff syntax, scope confinement, baseline defect reproduction verification, pristine source repository before/after streaming SHA-256 manifest immutability & workspace containment, and secret scrubbing).
    - Marks status as `PASSED`, `FAILED`, `NOT_RUN`, or `INCONCLUSIVE`.
 10. **Stage 10: Evidence Report**:
     - Generates downloadable Markdown and JSON evidence documents with raw command logs and audit tables.

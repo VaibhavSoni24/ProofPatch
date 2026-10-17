@@ -9,9 +9,9 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | Test Suite | Framework | Count | Purpose |
 |---|---|---|---|
 | **Backend Configuration** | `pytest` | 4 tests | Tests default demo mode, Nebius detection, Tavily detection, and secret exclusion. |
-| **Demo Workflow** | `pytest` | 1 test | End-to-end local reproduction, patching, regression pass, and evidence generation. |
+| **Demo Workflow** | `pytest` | 8 tests | End-to-end local reproduction, strict baseline classification, boundary failure verification, patch application, regression pass, and handling of timeouts, collection errors, import failures, and post-patch errors. |
 | **Git & Repositories** | `pytest` | 6 tests | Tests public GitHub URL parsing, credential rejection, scheme verification. |
-| **Repository Security Controls** | `pytest` | 18 tests | Tests symlink rejection, path containment, sensitive file exclusion (.env, keys, credentials), allowed templates, stat errors, strict transfer fail-closed behavior, safe file reading with race protection, and deterministic SHA-256 manifests. |
+| **Repository Security Controls** | `pytest` | 26 tests | Tests symlink rejection, path containment, sensitive file exclusion (.env, keys, credentials), allowed templates, stat errors, strict transfer fail-closed behavior, safe file reading with race protection, safe repository isolation without following symlinks, and complete deterministic streaming SHA-256 manifests. |
 | **Nebius Provider** | `pytest` | 6 tests | Mocks OpenAI-compatible completions, non-NVIDIA model rejection, 401 auth, timeouts. |
 | **Tavily Provider** | `pytest` | 3 tests | Mocks search queries, disabled status, and network connection fallbacks. |
 | **Patch Parser & Security** | `pytest` | 6 tests | Path traversal rejection (`../`), diff size caps, clean hunk application. |
@@ -20,7 +20,7 @@ ProofPatch enforces rigorous automated test coverage across both backend orchest
 | **Deterministic Verifier** | `pytest` | 21 tests | Audits missing exit codes, inconclusive baseline tests, unrelated failures, import errors, collection errors, timeouts, contradictory post-patch outputs, secrets, missing original repo info, workspace root containment, pristine repository before/after manifest match, added/removed file detection in pristine checkout, and missing baseline manifests. |
 | **Async Orchestrator Integration** | `pytest` | 6 tests | Full async workflow with mocked Nebius, Tavily, strict baseline gating on unrelated failures, collection errors, timeouts, and provider error handling. |
 | **Frontend UI Suite** | `vitest` + RTL | 3 tests | Tests branding, demo banner, metric cards, tab navigation, and settings view. |
-| **Total Automated Tests** | | **108 tests** | **100% Pass Rate** |
+| **Total Automated Tests** | | **123 tests** | **100% Pass Rate** |
 
 ---
 

@@ -90,7 +90,7 @@ ProofPatch bridges generative AI and software engineering rigor through an evide
 - [x] Nebius Token Factory adapter with eligible NVIDIA model configuration.
 - [x] Nebius ConTree Token Factory sandbox adapter implementation via official `contree-sdk` and `contree-client`.
 - [x] Tavily Search API research integration.
-- [x] Passing backend tests (105 tests) and frontend tests (3 tests) — 108 automated tests total.
+- [x] Passing backend tests (120 tests) and frontend tests (3 tests) — 123 automated tests total.
 - [x] Automated CI workflow (`.github/workflows/ci.yml`).
 - [ ] Add valid `NEBIUS_API_KEY` and select active model in `.env` before live demonstration.
 - [ ] Record and upload 2-3 minute YouTube demonstration video (see `docs/DEMO_SCRIPT.md`).
