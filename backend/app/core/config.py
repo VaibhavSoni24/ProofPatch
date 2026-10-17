@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     model_timeout_seconds: int = 90
     sandbox_timeout_seconds: int = 60
     max_repository_files: int = 300
+    max_file_size_bytes: int = 500_000
+    max_repository_transfer_bytes: int = 10_000_000
     max_context_characters: int = 40000
     max_patch_bytes: int = 50000
 

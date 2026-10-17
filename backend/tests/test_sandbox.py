@@ -356,3 +356,160 @@ def test_token_factory_sandbox_no_silent_host_fallback():
     backend = get_execution_backend(mode="live", backend_override="token_factory_sandbox")
     assert not isinstance(backend, LocalExecutionBackend)
     assert backend.backend_name == "token_factory_sandbox"
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_per_file_size_limit_exceeded(tmp_path, monkeypatch):
+    """Verify transfer_workspace fails closed when a file exceeds the per-file size limit."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_file_size_bytes", 50)
+
+    oversized = tmp_path / "big_data.py"
+    oversized.write_text("x" * 200, encoding="utf-8")
+
+    mock_image = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="exceeds maximum allowed per-file limit"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_cumulative_size_limit_exceeded(tmp_path, monkeypatch):
+    """Verify transfer_workspace fails closed when cumulative transfer bytes exceed limit."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_repository_transfer_bytes", 150)
+
+    (tmp_path / "f1.py").write_text("a" * 80, encoding="utf-8")
+    (tmp_path / "f2.py").write_text("b" * 90, encoding="utf-8")
+
+    mock_image = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="exceeds cumulative limit"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_file_count_limit_exceeded(tmp_path, monkeypatch):
+    """Verify transfer_workspace fails closed when file count cap is exceeded."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_repository_files", 2)
+
+    (tmp_path / "f1.py").write_text("print(1)", encoding="utf-8")
+    (tmp_path / "f2.py").write_text("print(2)", encoding="utf-8")
+    (tmp_path / "f3.py").write_text("print(3)", encoding="utf-8")
+
+    mock_image = AsyncMock()
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="exceeds maximum allowed file limit"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_bootstrap_missing_exit_code(tmp_path):
+    """Verify dependency bootstrap fails closed if exit code is missing (None)."""
+    mock_image = AsyncMock()
+    call_count = 0
+
+    async def mock_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        img = AsyncMock()
+        img.run = mock_run
+        img.exit_code = 0 if call_count == 1 else None
+        return img
+
+    mock_image.run = mock_run
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="without an exit code"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_bootstrap_malformed_exit_code(tmp_path):
+    """Verify dependency bootstrap fails closed if exit code is not a valid integer."""
+    mock_image = AsyncMock()
+    call_count = 0
+
+    async def mock_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        img = AsyncMock()
+        img.run = mock_run
+        img.exit_code = 0 if call_count == 1 else "NOT_AN_INT"
+        return img
+
+    mock_image.run = mock_run
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="malformed exit code"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_bootstrap_timeout(tmp_path):
+    """Verify dependency bootstrap handles remote command timeout."""
+    mock_image = AsyncMock()
+    call_count = 0
+
+    async def mock_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise asyncio.TimeoutError()
+        img = AsyncMock()
+        img.run = mock_run
+        img.exit_code = 0
+        return img
+
+    mock_image.run = mock_run
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="timed out"):
+        await backend.transfer_workspace(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_token_factory_sandbox_bootstrap_remote_failure(tmp_path):
+    """Verify dependency bootstrap handles unexpected remote container exception."""
+    mock_image = AsyncMock()
+    call_count = 0
+
+    async def mock_run(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise RuntimeError("ConTree host network terminated")
+        img = AsyncMock()
+        img.run = mock_run
+        img.exit_code = 0
+        return img
+
+    mock_image.run = mock_run
+    mock_client = AsyncMock()
+    mock_client.images.use.return_value = mock_image
+
+    backend = TokenFactorySandboxBackend(token="test-token", client=mock_client)
+    with pytest.raises(ProviderError, match="dependency installation failed"):
+        await backend.transfer_workspace(tmp_path)

@@ -34,7 +34,7 @@ except ImportError:
     UploadFileSpec = None
 
 from app.core.config import get_settings
-from app.core.errors import ConfigurationError, ProviderError
+from app.core.errors import ConfigurationError, ProviderError, SecurityViolationError
 from app.core.logging import logger
 from app.sandbox.base import BaseExecutionBackend, ExecutionResult
 from app.sandbox.limits import (
@@ -132,6 +132,8 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
 
     async def transfer_workspace(self, workspace_dir: Path) -> None:
         """Collect bounded repository contents from workspace_dir and transfer into remote sandbox."""
+        from app.repositories.security import safe_walk_repository
+
         self._validate_credentials()
         if not self._remote_image:
             await self.acquire_session()
@@ -139,31 +141,33 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
         if not workspace_dir.is_dir():
             raise FileNotFoundError(f"Local workspace directory does not exist: {workspace_dir}")
 
-        # Scan files with bounded limit to prevent memory/payload exhaustion
+        # Scan files with strict security traversal and bounded limits (fail-closed)
         files_to_transfer: Dict[str, bytes] = {}
-        scanned_count = 0
-        ignored_dirs = {".git", ".venv", "venv", "__pycache__", ".pytest_cache", "node_modules"}
-
-        for item in workspace_dir.rglob("*"):
-            if any(part in ignored_dirs for part in item.parts):
-                continue
-            if item.is_file():
-                scanned_count += 1
-                if scanned_count > settings.max_repository_files:
-                    logger.warning(
-                        "Reached maximum repository file cap (%d); skipping remaining files.",
-                        settings.max_repository_files,
-                    )
-                    break
+        try:
+            for entry in safe_walk_repository(
+                workspace_dir=workspace_dir,
+                max_files=settings.max_repository_files,
+                max_file_size_bytes=settings.max_file_size_bytes,
+                max_total_bytes=settings.max_repository_transfer_bytes,
+                fail_on_limits=True,
+            ):
                 try:
-                    rel_path = item.relative_to(workspace_dir).as_posix()
-                    content = item.read_bytes()
-                    # Bounded size per file (e.g. 500KB)
-                    if len(content) <= settings.max_patch_bytes * 10:
-                        remote_dest = f"/workspace/{rel_path}"
-                        files_to_transfer[remote_dest] = content
+                    remote_dest = f"/workspace/{entry.rel_path}"
+                    files_to_transfer[remote_dest] = entry.path.read_bytes()
                 except Exception as read_err:
-                    logger.debug("Skipping unreadable file %s: %s", item, read_err)
+                    logger.error("Failed to read repository file %s: %s", entry.rel_path, read_err)
+                    raise ProviderError(
+                        "TokenFactorySandbox",
+                        f"Failed to read repository file '{entry.rel_path}': {read_err}",
+                        status_code=502,
+                    )
+        except SecurityViolationError as sec_err:
+            logger.error("Security violation during workspace transfer: %s", sec_err)
+            raise ProviderError(
+                "TokenFactorySandbox",
+                f"Repository transfer rejected by security policy: {sec_err}",
+                status_code=502,
+            )
 
         logger.info(
             "Transferring %d repository file(s) into remote ConTree sandbox (/workspace)...",
@@ -208,14 +212,59 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
                 dep_cmd += " -e /workspace"
 
             logger.info("Installing dependencies in ConTree sandbox: %s", dep_cmd)
-            self._remote_image = await self._remote_image.run(
-                shell=dep_cmd,
-                cwd="/workspace",
-                disposable=False,
-                timeout=float(self.timeout_seconds),
-            )
-            dep_exit_code = getattr(self._remote_image, "exit_code", None)
-            if dep_exit_code is not None and dep_exit_code != 0:
+            try:
+                self._remote_image = await self._remote_image.run(
+                    shell=dep_cmd,
+                    cwd="/workspace",
+                    disposable=False,
+                    timeout=float(self.timeout_seconds),
+                )
+            except asyncio.TimeoutError:
+                raise ProviderError(
+                    "TokenFactorySandbox",
+                    f"Remote sandbox dependency installation timed out after {self.timeout_seconds}s.",
+                    status_code=504,
+                )
+            except Exception as run_err:
+                if "timeout" in str(run_err).lower():
+                    raise ProviderError(
+                        "TokenFactorySandbox",
+                        f"Remote sandbox dependency installation timed out: {run_err}",
+                        status_code=504,
+                    )
+                raise ProviderError(
+                    "TokenFactorySandbox",
+                    f"Remote sandbox dependency installation failed: {run_err}",
+                    status_code=502,
+                )
+
+            # Retrieve and strictly validate exit code
+            try:
+                raw_dep_exit_code = getattr(self._remote_image, "exit_code", None)
+            except Exception as exc:
+                raise ProviderError(
+                    "TokenFactorySandbox",
+                    f"Failed to retrieve dependency bootstrap exit code: {exc}",
+                    status_code=502,
+                )
+
+            if raw_dep_exit_code is None:
+                raise ProviderError(
+                    "TokenFactorySandbox",
+                    "Remote sandbox dependency installation completed without an exit code; cannot establish dependency bootstrap state.",
+                    status_code=502,
+                )
+
+            try:
+                dep_exit_code = int(raw_dep_exit_code)
+            except (ValueError, TypeError):
+                raise ProviderError(
+                    "TokenFactorySandbox",
+                    f"Remote sandbox dependency installation returned a malformed exit code: {raw_dep_exit_code!r}",
+                    status_code=502,
+                )
+
+            if dep_exit_code != 0:
                 dep_stderr = getattr(self._remote_image, "stderr", "") or ""
                 dep_stdout = getattr(self._remote_image, "stdout", "") or ""
                 err_msg = (dep_stderr or dep_stdout).strip()
@@ -343,15 +392,18 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
 
         # 2. Synchronize modified files into remote sandbox
         if self._remote_image and modified:
+            from app.repositories.security import validate_path_containment
+
             patch_specs = []
             if UploadFileSpec is not None:
                 for rel_file in modified:
                     local_file = workspace_dir / rel_file
-                    if local_file.is_file():
+                    safe_file = validate_path_containment(local_file, workspace_dir)
+                    if safe_file.is_file():
                         patch_specs.append(
                             UploadFileSpec(
                                 path=PurePosixPath(f"/workspace/{rel_file}"),
-                                source=local_file.read_bytes(),
+                                source=safe_file.read_bytes(),
                             )
                         )
 
@@ -368,8 +420,9 @@ class TokenFactorySandboxBackend(BaseExecutionBackend):
                 remote_patch_files: Dict[str, bytes] = {}
                 for rel_file in modified:
                     local_file = workspace_dir / rel_file
-                    if local_file.is_file():
-                        remote_patch_files[f"/workspace/{rel_file}"] = local_file.read_bytes()
+                    safe_file = validate_path_containment(local_file, workspace_dir)
+                    if safe_file.is_file():
+                        remote_patch_files[f"/workspace/{rel_file}"] = safe_file.read_bytes()
                 if remote_patch_files:
                     self._remote_image = await self._remote_image.apply_files(remote_patch_files)
 

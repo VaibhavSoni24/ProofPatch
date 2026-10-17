@@ -9,6 +9,8 @@ DEFAULT_COMMAND_TIMEOUT_SECONDS = settings.sandbox_timeout_seconds
 MAX_OUTPUT_CHARACTERS = 30000
 MAX_PATCH_BYTES = settings.max_patch_bytes
 MAX_FILES_IN_REPOSITORY = settings.max_repository_files
+MAX_FILE_SIZE_BYTES = settings.max_file_size_bytes
+MAX_REPOSITORY_TRANSFER_BYTES = settings.max_repository_transfer_bytes
 
 # Test execution command allowlist
 ALLOWED_TEST_BINARIES = ("pytest", "python -m pytest")
